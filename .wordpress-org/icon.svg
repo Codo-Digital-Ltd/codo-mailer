@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+	<title>Codo Mailer</title>
+	<rect width="256" height="256" rx="56" fill="#025373"/>
+	<!-- Envelope -->
+	<rect x="40" y="66" width="164" height="118" rx="14" fill="#ffffff"/>
+	<path d="M50 78 L122 132 L194 78" fill="none" stroke="#025373" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+	<!-- Delivered / secured badge -->
+	<circle cx="190" cy="180" r="42" fill="#F29472" stroke="#025373" stroke-width="10"/>
+	<path d="M171 181 L185 195 L210 168" fill="none" stroke="#ffffff" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

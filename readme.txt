@@ -137,12 +137,6 @@ This plugin sends your site's outgoing email, including recipients, subject, bod
 
 If you set an alert webhook, failure alerts (site name, URL, failed email subject and error) are posted to that URL.
 
-== Screenshots ==
-
-1. Settings: choose primary and backup providers.
-2. Email log with sent and failed messages.
-3. Log entry with resend.
-
 == Changelog ==
 
 = 1.0.0 =
