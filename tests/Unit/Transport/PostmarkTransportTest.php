@@ -75,6 +75,12 @@ class PostmarkTransportTest extends HttpTransportTestCase {
 		$this->assertSame( 'Attachment "missing.pdf" could not be read.', $result->error() );
 	}
 
+	public function test_bcc_only_messages_are_rejected_clearly() {
+		$message = $this->message( array( 'to' => array(), 'bcc' => array( array( 'email' => 'b@example.org', 'name' => '' ) ) ) );
+		$result  = $this->transport( $this->unused_http() )->send( $message );
+		$this->assertSame( 'Postmark requires at least one To recipient (Cc/Bcc-only messages are not supported).', $result->error() );
+	}
+
 	public function test_invalid_utf8_fails_cleanly() {
 		$result = $this->transport( $this->unused_http() )->send( $this->message( array( 'subject' => "\xB1\x31" ) ) );
 		$this->assertSame( 'Could not encode the request as JSON.', $result->error() );

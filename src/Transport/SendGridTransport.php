@@ -41,6 +41,8 @@ final class SendGridTransport extends AbstractHttpTransport {
 	 * @throws TransportException On failure.
 	 */
 	protected function deliver( Message $message ) {
+		$this->require_to( $message );
+
 		// SendGrid rejects an address that appears in more than one list.
 		$seen            = array();
 		$personalization = array();

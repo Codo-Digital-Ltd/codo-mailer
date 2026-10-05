@@ -18,7 +18,12 @@ require_once __DIR__ . '/src/Autoloader.php';
  * Multisite: clean every site, since each has its own table and option.
  */
 if ( is_multisite() ) {
-	foreach ( get_sites( array( 'fields' => 'ids' ) ) as $codo_mailer_site_id ) {
+	foreach ( get_sites(
+		array(
+			'fields' => 'ids',
+			'number' => 0,
+		)
+	) as $codo_mailer_site_id ) {
 		switch_to_blog( $codo_mailer_site_id );
 		\CodoDigital\Mailer\Plugin::uninstall();
 		restore_current_blog();

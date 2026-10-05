@@ -66,6 +66,52 @@ class AlertNotifier {
 	}
 
 	/**
+	 * First failure waiting to be alerted at the end of the request.
+	 *
+	 * @var array{0: Message|null, 1: string}|null
+	 */
+	private $pending = null;
+
+	/**
+	 * Queue an alert for the end of the request (shutdown), so a visitor at
+	 * checkout isn't kept waiting while the alert itself is sent.
+	 *
+	 * Only the first failure in a request is alerted.
+	 *
+	 * @param Message|null $message Failed message.
+	 * @param string       $error   Error description.
+	 * @return void
+	 */
+	public function defer( $message, $error ) {
+		if ( null !== $this->pending ) {
+			return;
+		}
+		$this->pending = array( $message, (string) $error );
+		add_action( 'shutdown', array( $this, 'flush' ) );
+	}
+
+	/**
+	 * Send the queued alert (shutdown callback).
+	 *
+	 * @return string[] Channels notified.
+	 */
+	public function flush() {
+		if ( null === $this->pending ) {
+			return array();
+		}
+		list( $message, $error ) = $this->pending;
+		$this->pending           = null;
+
+		// Let the visitor's response finish first (PHP-FPM only).
+		// @codeCoverageIgnoreStart
+		if ( function_exists( 'fastcgi_finish_request' ) && ! headers_sent() ) {
+			fastcgi_finish_request();
+		}
+		// @codeCoverageIgnoreEnd
+		return $this->notify( $message, $error );
+	}
+
+	/**
 	 * Notify about a failed message.
 	 *
 	 * @param Message|null $message Failed message (null if it could not be built).
@@ -161,7 +207,7 @@ class AlertNotifier {
 		);
 
 		try {
-			$response = $this->http->request( 'POST', $url, array( 'Content-Type' => 'application/json' ), (string) $payload, 10 );
+			$response = $this->http->request( 'POST', $url, array( 'Content-Type' => 'application/json' ), (string) $payload, 10, true );
 		} catch ( TransportException $e ) {
 			return false;
 		}

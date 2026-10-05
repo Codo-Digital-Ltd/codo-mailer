@@ -2,17 +2,18 @@
 #
 # Bump the version in codo-mailer.php (header + CODO_MAILER_VERSION) and
 # readme.txt (Stable tag + changelog) in the same pull request. When it lands
-# on main and every check passes, this workflow tags vX.Y.Z, publishes a
-# GitHub release with the zip, and commits the release to the WordPress.org
-# SVN repository. WordPress.org then offers the update to every site running
+# on main and every check passes, this workflow commits the release to the
+# WordPress.org SVN repository, then tags vX.Y.Z and publishes a GitHub
+# release with the zip. WordPress.org then offers the update to every site running
 # the plugin through the normal Dashboard > Updates screen (and auto-updates
 # where the site owner has enabled them).
 #
 # Pushes to main that don't change the version only sync readme.txt and
 # .wordpress-org assets (e.g. a "Tested up to" bump) to WordPress.org.
 #
-# Required repository secrets: SVN_USERNAME, SVN_PASSWORD (WordPress.org
-# account with commit access to the plugin).
+# Required secrets (in the "wordpress-org" environment): SVN_USERNAME and
+# SVN_PASSWORD for a WordPress.org account with commit access to the plugin.
+# Third-party actions are pinned to commit SHAs because they see those secrets.
 
 name: Release
 
@@ -38,24 +39,30 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       is_new: ${{ steps.version.outputs.is_new }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: shivammathur/setup-php@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
         with:
           php-version: '8.3'
           coverage: none
       - id: version
+        # WordPress.org SVN is the source of truth: if tags/X.Y.Z exists the
+        # version is live, so a release that failed half-way is retried on
+        # the next push instead of being skipped.
         run: |
           version="$(php bin/check-version.php)"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
-          if git rev-parse -q --verify "refs/tags/v${version}" >/dev/null; then
-            echo "is_new=false" >> "$GITHUB_OUTPUT"
-            echo "v${version} is already released."
-          else
-            echo "is_new=true" >> "$GITHUB_OUTPUT"
-            echo "v${version} will be released."
+          repo="$(curl -s -o /dev/null -w '%{http_code}' https://plugins.svn.wordpress.org/codo-mailer/)"
+          if [ "$repo" = "404" ]; then
+            echo "is_new=skip" >> "$GITHUB_OUTPUT"
+            echo "::notice::codo-mailer is not on WordPress.org yet (awaiting review); skipping deploy."
+            exit 0
           fi
+          status="$(curl -s -o /dev/null -w '%{http_code}' "https://plugins.svn.wordpress.org/codo-mailer/tags/${version}/")"
+          case "$status" in
+            200) echo "is_new=false" >> "$GITHUB_OUTPUT"; echo "${version} is already on WordPress.org." ;;
+            404) echo "is_new=true"  >> "$GITHUB_OUTPUT"; echo "${version} will be released." ;;
+            *)   echo "Unexpected HTTP ${status} from WordPress.org SVN; not releasing." >&2; exit 1 ;;
+          esac
 
   release:
     name: Release v${{ needs.detect.outputs.version }}
@@ -66,11 +73,11 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Deploy to WordPress.org
         id: deploy
-        uses: 10up/action-wordpress-plugin-deploy@stable
+        uses: 10up/action-wordpress-plugin-deploy@54bd289b8525fd23a5c365ec369185f2966529c2 # stable
         with:
           generate-zip: true
         env:
@@ -84,10 +91,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.detect.outputs.version }}
         run: |
-          gh release create "v${VERSION}" "${{ steps.deploy.outputs.zip-path }}" \
-            --target "${GITHUB_SHA}" \
-            --title "Codo Mailer ${VERSION}" \
-            --notes "See the changelog in readme.txt. Published to https://wordpress.org/plugins/codo-mailer/"
+          if gh release view "v${VERSION}" >/dev/null 2>&1; then
+            gh release upload "v${VERSION}" "${{ steps.deploy.outputs.zip-path }}" --clobber
+          else
+            gh release create "v${VERSION}" "${{ steps.deploy.outputs.zip-path }}" \
+              --target "${GITHUB_SHA}" \
+              --title "Codo Mailer ${VERSION}" \
+              --notes "See the changelog in readme.txt. Published to https://wordpress.org/plugins/codo-mailer/"
+          fi
 
   sync-readme:
     name: Sync readme and assets
@@ -96,8 +107,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: wordpress-org
     steps:
-      - uses: actions/checkout@v4
-      - uses: 10up/action-wordpress-plugin-asset-update@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: 10up/action-wordpress-plugin-asset-update@2480306f6f693672726d08b5917ea114cb2825f7 # stable
         env:
           SVN_USERNAME: ${{ secrets.SVN_USERNAME }}
           SVN_PASSWORD: ${{ secrets.SVN_PASSWORD }}

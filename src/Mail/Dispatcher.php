@@ -243,7 +243,7 @@ class Dispatcher {
 		do_action( 'wp_mail_failed', new \WP_Error( 'wp_mail_failed', $error, $mail_data ) ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- core hook.
 
 		if ( ! AlertNotifier::is_sending() ) {
-			$this->alerts->notify( $message, $error );
+			$this->alerts->defer( $message, $error );
 		}
 	}
 

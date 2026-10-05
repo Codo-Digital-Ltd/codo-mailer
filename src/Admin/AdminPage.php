@@ -22,9 +22,8 @@ defined( 'ABSPATH' ) || exit;
  */
 class AdminPage {
 
-	const SLUG       = 'codo-mailer';
-	const CAPABILITY = 'manage_options';
-	const PER_PAGE   = 25;
+	const SLUG     = 'codo-mailer';
+	const PER_PAGE = 25;
 
 	/**
 	 * Settings.
@@ -95,6 +94,27 @@ class AdminPage {
 	}
 
 	/**
+	 * Capability needed to manage mail.
+	 *
+	 * On multisite this is a network capability: whoever controls the mail
+	 * route (or turns off redaction) can read every password-reset email,
+	 * including a super admin's, so subsite admins must not have it.
+	 *
+	 * @return string
+	 */
+	public function capability() {
+		$default = is_multisite() ? 'manage_network_options' : 'manage_options';
+
+		/**
+		 * Filters the capability required to manage Codo Mailer.
+		 *
+		 * @param string $capability Capability.
+		 */
+		$capability = apply_filters( 'codo_mailer_capability', $default );
+		return is_string( $capability ) && '' !== $capability ? $capability : $default;
+	}
+
+	/**
 	 * Add the settings page.
 	 *
 	 * @return void
@@ -103,7 +123,7 @@ class AdminPage {
 		add_options_page(
 			__( 'Codo Mailer', 'codo-mailer' ),
 			__( 'Codo Mailer', 'codo-mailer' ),
-			self::CAPABILITY,
+			$this->capability(),
 			self::SLUG,
 			array( $this, 'render' )
 		);
@@ -167,7 +187,7 @@ class AdminPage {
 	 * @return void
 	 */
 	public function render() {
-		if ( ! current_user_can( self::CAPABILITY ) ) {
+		if ( ! current_user_can( $this->capability() ) ) {
 			wp_die( esc_html__( 'You do not have permission to manage email settings.', 'codo-mailer' ), 403 );
 		}
 
@@ -299,7 +319,7 @@ class AdminPage {
 			printf( '<table class="form-table" role="presentation" data-codo-slot="%s" data-codo-type="%s">', esc_attr( $slot ), esc_attr( $type ) );
 			$values = $config['type'] === $type ? $config : array();
 			foreach ( $meta['fields'] as $field => $field_meta ) {
-				$this->connection_field( $slot, $field, $field_meta, $values );
+				$this->connection_field( $slot, $type, $field, $field_meta, $values );
 			}
 			echo '</table>';
 		}
@@ -309,14 +329,17 @@ class AdminPage {
 	 * One connection field.
 	 *
 	 * @param string               $slot   Slot.
+	 * @param string               $type   Connection type the field belongs to.
 	 * @param string               $field  Field key.
 	 * @param array<string, mixed> $meta   Field metadata.
 	 * @param array<string, mixed> $values Current values (empty if another type is active).
 	 * @return void
 	 */
-	private function connection_field( $slot, $field, array $meta, array $values ) {
-		$id     = 'codo-mailer-' . $slot . '-' . $field;
-		$name   = 'codo_mailer[' . $slot . '][' . $field . ']';
+	private function connection_field( $slot, $type, $field, array $meta, array $values ) {
+		// Every provider's fields are in the page (the type switcher hides the
+		// others), so names carry the type: hidden inputs are still submitted.
+		$id     = 'codo-mailer-' . $slot . '-' . $type . '-' . $field;
+		$name   = 'codo_mailer[' . $slot . '][' . $type . '][' . $field . ']';
 		$locked = $this->settings->is_connection_constant( $slot, $field );
 		$value  = array_key_exists( $field, $values ) ? $values[ $field ] : ( isset( $meta['default'] ) ? $meta['default'] : '' );
 
@@ -698,7 +721,7 @@ class AdminPage {
 	 * @return void
 	 */
 	private function guard( $action ) {
-		if ( ! current_user_can( self::CAPABILITY ) ) {
+		if ( ! current_user_can( $this->capability() ) ) {
 			wp_die( esc_html__( 'You do not have permission to manage email settings.', 'codo-mailer' ), 403 );
 		}
 		check_admin_referer( $action );

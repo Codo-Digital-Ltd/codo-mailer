@@ -44,7 +44,7 @@ class LogRepositoryTest extends TestCase {
 				}
 			)
 		);
-		Functions\expect( 'update_option' )->once()->with( LogRepository::DB_VERSION_OPTION, LogRepository::DB_VERSION, false );
+		Functions\expect( 'update_option' )->once()->with( LogRepository::DB_VERSION_OPTION, LogRepository::DB_VERSION, true );
 
 		$this->repo()->install();
 	}

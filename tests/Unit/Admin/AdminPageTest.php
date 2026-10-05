@@ -163,6 +163,20 @@ class AdminPageTest extends TestCase {
 		$this->page()->add_menu();
 	}
 
+	public function test_multisite_requires_a_network_capability() {
+		Functions\when( 'is_multisite' )->justReturn( true );
+		$this->assertSame( 'manage_network_options', $this->page()->capability() );
+
+		Functions\expect( 'add_options_page' )->once()->with( \Mockery::any(), \Mockery::any(), 'manage_network_options', 'codo-mailer', \Mockery::any() );
+		$this->page()->add_menu();
+	}
+
+	public function test_capability_is_filterable_but_never_empty() {
+		\Brain\Monkey\Filters\expectApplied( 'codo_mailer_capability' )->twice()->andReturn( 'edit_mail', '' );
+		$this->assertSame( 'edit_mail', $this->page()->capability() );
+		$this->assertSame( 'manage_options', $this->page()->capability() );
+	}
+
 	public function test_action_links_prepend_settings() {
 		$links = $this->page()->action_links( array( 'deactivate' => '<a>Deactivate</a>' ) );
 		$this->assertStringContainsString( 'page=codo-mailer', $links[0] );
@@ -201,13 +215,113 @@ class AdminPageTest extends TestCase {
 
 		$this->assertStringContainsString( 'nav-tab nav-tab-active">Settings', $html );
 		$this->assertStringContainsString( 'value="noreply@example.com"', $html );
-		$this->assertStringContainsString( 'value="smtp.example.com"', $html );
+		$this->assertStringContainsString( 'name="codo_mailer[primary][smtp][host]" value="smtp.example.com"', $html );
 		$this->assertStringContainsString( 'Saved. Leave blank to keep it.', $html );
 		$this->assertStringNotContainsString( 'TOP-SECRET', $html );
 		$this->assertStringContainsString( 'nonce-codo_mailer_save', $html );
 		$this->assertStringContainsString( '<option value="smtp" selected="selected">SMTP</option>', $html );
 		$this->assertStringContainsString( 'data-codo-type="ses"', $html, 'every provider is rendered for the type switcher' );
 		$this->assertStringContainsString( 'Used only when the primary connection fails.', $html );
+	}
+
+	/**
+	 * Collect a form's fields the way a browser submits them.
+	 *
+	 * @param string $html Page HTML.
+	 * @return array<string, string> name => value (repeated names: last wins, as in PHP).
+	 */
+	private function browser_fields( $html ) {
+		$dom = new \DOMDocument();
+		@$dom->loadHTML( '<?xml encoding="utf-8"?>' . $html ); // phpcs:ignore -- HTML5 tags warn.
+		$fields = array();
+		foreach ( ( new \DOMXPath( $dom ) )->query( '//form//input | //form//select' ) as $el ) {
+			$name = $el->getAttribute( 'name' );
+			if ( '' === $name || $el->hasAttribute( 'disabled' ) ) {
+				continue;
+			}
+			if ( 'select' === $el->nodeName ) {
+				$value = null;
+				foreach ( $el->getElementsByTagName( 'option' ) as $i => $option ) {
+					if ( 0 === $i || $option->hasAttribute( 'selected' ) ) {
+						$value = $option->getAttribute( 'value' );
+					}
+				}
+				$fields[] = array( $name, (string) $value );
+				continue;
+			}
+			$type = strtolower( $el->getAttribute( 'type' ) );
+			if ( 'checkbox' === $type && ! $el->hasAttribute( 'checked' ) ) {
+				continue;
+			}
+			$fields[] = array( $name, $el->getAttribute( 'value' ) );
+		}
+		return $fields;
+	}
+
+	/**
+	 * Submit the settings form as a user who picked $type and filled its fields.
+	 *
+	 * @param string               $type   Provider.
+	 * @param array<string, mixed> $values Field values typed by the user.
+	 * @return array<string, mixed> Effective primary connection after saving.
+	 */
+	private function submit_provider( $type, array $values ) {
+		$fields = $this->browser_fields( $this->render() );
+		$query  = array();
+		foreach ( $fields as $pair ) {
+			list( $name, $value ) = $pair;
+			if ( 'codo_mailer[primary][type]' === $name ) {
+				$value = $type;
+			}
+			foreach ( $values as $field => $typed ) {
+				if ( "codo_mailer[primary][{$type}][{$field}]" === $name ) {
+					$value = $typed;
+				}
+			}
+			$query[] = rawurlencode( $name ) . '=' . rawurlencode( $value );
+		}
+		parse_str( implode( '&', $query ), $post );
+
+		Functions\when( 'update_option' )->alias(
+			function ( $name, $value ) {
+				$this->option = $value;
+				return true;
+			}
+		);
+		$this->settings->save( $post['codo_mailer'] );
+		return $this->settings->connection( 'primary' );
+	}
+
+	/**
+	 * Regression: every provider's fields are in the page, so they must not
+	 * share names (hidden inputs are still submitted; PHP keeps the last).
+	 *
+	 * @dataProvider providers
+	 */
+	public function test_each_provider_saves_from_the_rendered_form( $type, array $typed ) {
+		$connection = $this->submit_provider( $type, $typed );
+
+		$this->assertSame( $type, $connection['type'] );
+		foreach ( $typed as $field => $value ) {
+			$this->assertEquals( $value, $connection[ $field ], "$type.$field" );
+		}
+	}
+
+	public function providers() {
+		return array(
+			'smtp'     => array( 'smtp', array( 'host' => 'smtp.example.com', 'port' => 465, 'encryption' => 'ssl', 'username' => 'u', 'password' => 'p' ) ),
+			'ses'      => array( 'ses', array( 'region' => 'eu-west-2', 'access_key' => 'AKIA1', 'secret_key' => 's3' ) ),
+			'postmark' => array( 'postmark', array( 'server_token' => 'pm', 'message_stream' => 'broadcast' ) ),
+			'mailgun'  => array( 'mailgun', array( 'domain' => 'mg.example.com', 'api_key' => 'key-1', 'region' => 'us' ) ),
+			'brevo'    => array( 'brevo', array( 'api_key' => 'xkeysib' ) ),
+			'sendgrid' => array( 'sendgrid', array( 'api_key' => 'SG.1' ) ),
+		);
+	}
+
+	public function test_resaving_the_form_keeps_secrets() {
+		$this->submit_provider( 'mailgun', array( 'domain' => 'mg.example.com', 'api_key' => 'key-1' ) );
+		$connection = $this->submit_provider( 'mailgun', array() );
+		$this->assertSame( 'key-1', $connection['api_key'], 'blank secret field keeps the saved key' );
 	}
 
 	public function test_constant_values_are_read_only() {

@@ -47,6 +47,7 @@ class PluginTest extends TestCase {
 	public function test_boot_registers_once() {
 		Functions\when( 'get_option' )->justReturn( LogRepository::DB_VERSION );
 		Functions\when( 'is_admin' )->justReturn( false );
+		Functions\when( 'wp_next_scheduled' )->justReturn( 123 );
 
 		$first  = Plugin::boot();
 		$second = Plugin::boot();
@@ -59,6 +60,8 @@ class PluginTest extends TestCase {
 
 	public function test_register_in_admin_adds_admin_hooks() {
 		Functions\when( 'is_admin' )->justReturn( true );
+		Functions\expect( 'wp_next_scheduled' )->once()->andReturn( false );
+		Functions\expect( 'wp_schedule_event' )->once()->with( \Mockery::type( 'int' ), 'daily', Plugin::CRON_HOOK );
 		$log = \Mockery::mock( LogRepository::class );
 		$log->shouldReceive( 'maybe_install' )->once();
 		$dispatcher = \Mockery::mock( Dispatcher::class );

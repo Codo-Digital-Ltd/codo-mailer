@@ -93,6 +93,7 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase {
 					return $url . ( false === strpos( $url, '?' ) ? '?' : '&' ) . http_build_query( $args );
 				},
 				'plugin_basename'       => 'codo-mailer/codo-mailer.php',
+				'is_multisite'          => false,
 			)
 		);
 	}

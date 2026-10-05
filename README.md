@@ -1,6 +1,6 @@
 # Codo Mailer
 
-[![CI](https://github.com/cododigital/codo-mailer/actions/workflows/ci.yml/badge.svg)](https://github.com/cododigital/codo-mailer/actions/workflows/ci.yml)
+[![CI](https://github.com/Codo-Digital-Ltd/codo-mailer/actions/workflows/ci.yml/badge.svg)](https://github.com/Codo-Digital-Ltd/codo-mailer/actions/workflows/ci.yml)
 ![Coverage](https://img.shields.io/badge/coverage-%E2%89%A595%25-brightgreen)
 ![PHP](https://img.shields.io/badge/PHP-7.4%E2%80%938.4-777bb4)
 ![WordPress](https://img.shields.io/badge/WordPress-6.2%2B-21759b)
@@ -18,11 +18,11 @@ wp_mail()
                               ├─ primary Transport ─┐
                               ├─ backup Transport  ─┴─ SMTP (PHPMailer) | SES v2 (SigV4) | Postmark | Mailgun | Brevo | SendGrid
                               ├─ LogRepository     redacted via Redactor
-                              └─ AlertNotifier     email + webhook, throttled, recursion-safe
+                              └─ AlertNotifier     email + webhook at shutdown, throttled, recursion-safe
 ```
 
 - Nothing changes until a primary connection is saved; until then `pre_wp_mail` returns `null` and core sends as usual.
-- Core hooks keep working: `wp_mail_from`, `wp_mail_from_name`, `wp_mail_content_type`, `wp_mail_charset`, `phpmailer_init` (SMTP), `wp_mail_succeeded`, `wp_mail_failed`.
+- Core hooks keep working: `wp_mail_from`, `wp_mail_from_name`, `wp_mail_content_type`, `wp_mail_charset`, `phpmailer_init` (SMTP, SES, Mailgun), `wp_mail_succeeded`, `wp_mail_failed`.
 - SES and Mailgun receive raw MIME built by WordPress's bundled PHPMailer, with Bcc passed only as envelope recipients.
 
 ## Naming and collisions
@@ -56,9 +56,9 @@ Tests are unit tests with [Brain Monkey](https://giacomogaliano.github.io/brain-
 1. In a pull request, bump the version in `codo-mailer.php` (header and `CODO_MAILER_VERSION`) and `readme.txt` (`Stable tag` and a `= x.y.z =` changelog entry). CI fails if they disagree.
 2. Merge to `main`.
 
-The [Release workflow](.github/workflows/release.yml) then runs every check, deploys the release to the WordPress.org SVN repository, tags `vX.Y.Z` and publishes a GitHub release with the zip. WordPress.org offers the update to every site running the plugin. Pushes that don't change the version only sync `readme.txt` and `.wordpress-org/` assets.
+The [Release workflow](.github/workflows/release.yml) then runs every check, deploys the release to the WordPress.org SVN repository, tags `vX.Y.Z` and publishes a GitHub release with the zip. WordPress.org offers the update to every site running the plugin. Whether a version is "already released" is decided by WordPress.org SVN itself, so a release that fails half-way is retried on the next push. Pushes that don't change the version only sync `readme.txt` and `.wordpress-org/` assets. Until WordPress.org approves the plugin, the deploy is skipped with a notice.
 
-Repository secrets required: `SVN_USERNAME`, `SVN_PASSWORD`. Banner and icon images for the directory go in `.wordpress-org/`.
+Secrets required, in a `wordpress-org` environment: `SVN_USERNAME`, `SVN_PASSWORD`. All third-party actions are pinned to commit SHAs. Banner and icon images for the directory go in `.wordpress-org/`.
 
 ## Security
 

@@ -34,6 +34,43 @@ class RedactorTest extends TestCase {
 		$this->assertStringNotContainsString( 'xyz789', $result['body'] );
 	}
 
+	/**
+	 * Secrets the first version missed (found in independent review).
+	 *
+	 * @dataProvider leaks
+	 */
+	public function test_secret_is_not_logged( $body, $secret ) {
+		$result = ( new Redactor() )->redact( $body );
+
+		$this->assertTrue( $result['redacted'] );
+		$this->assertStringNotContainsString( $secret, $result['body'] );
+	}
+
+	public function leaks() {
+		return array(
+			'esc_url-escaped separator'  => array( '<a href="https://shop.example/my-account/?action=newaccount&#038;key=WCKEY123&#038;login=jo">Set password</a>', 'WCKEY123' ),
+			'hex entity separator'       => array( 'https://e.com/wp-login.php?login=a&#x26;key=HEXKEY&#x26;action=rp', 'HEXKEY' ),
+			'core 7.x parameter order'   => array( 'https://e.com/wp-login.php?login=admin&key=ORDERKEY&action=rp&wp_lang=en_GB', 'ORDERKEY' ),
+			'url-encoded in redirect_to' => array( 'https://e.com/track?u=https%3A%2F%2Fe.com%2Fwp-login.php%3Faction%3Drp%26key%3DENCKEY', 'ENCKEY' ),
+			'multisite welcome password' => array( "Dear User,\n\nUsername: jo\nPassword: Tr0ub4dor&3\nLog in here: https://e.com/wp-login.php", 'Tr0ub4dor&3' ),
+			'html password line'         => array( '<p><strong>Password:</strong> s3cr3t-pw</p>', 's3cr3t-pw' ),
+			'email change confirmation'  => array( 'https://e.com/wp-admin/profile.php?newuseremail=abc123hash', 'abc123hash' ),
+			'admin email change'         => array( 'https://e.com/wp-admin/options.php?adminhash=ADMINHASH9', 'ADMINHASH9' ),
+			'user request confirmation'  => array( 'https://e.com/wp-login.php?action=confirmaction&request_id=5&confirm_key=CONFKEY', 'CONFKEY' ),
+			'membership plugin key'      => array( 'https://e.com/account/?mkey=MEMBERKEY', 'MEMBERKEY' ),
+		);
+	}
+
+	public function test_encoded_secret_withholds_the_whole_body() {
+		$result = ( new Redactor() )->redact( 'Click https://e.com/c?u=https%3A%2F%2Fe.com%2Fwp-login.php%3Faction%3Drp%26key%3DENCKEY' );
+		$this->assertSame( Redactor::WITHHELD, $result['body'] );
+	}
+
+	public function test_password_label_is_kept_and_prose_mentions_are_not_redacted() {
+		$result = ( new Redactor() )->redact( "Your password was changed.\nPassword: hunter2" );
+		$this->assertSame( "Your password was changed.\nPassword: " . Redactor::PLACEHOLDER, $result['body'] );
+	}
+
 	public function test_ordinary_email_is_untouched() {
 		$body   = 'Your order #123 has shipped. Track it at https://example.com/track?order=123';
 		$result = ( new Redactor() )->redact( $body );

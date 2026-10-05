@@ -83,10 +83,12 @@ final class SesTransport extends AbstractHttpTransport {
 
 		$body = $this->json(
 			array(
+				// Bare addresses: display names live in the MIME headers, where
+				// PHPMailer RFC 2047-encodes them; SES rejects raw non-ASCII here.
 				'Destination' => array(
-					'ToAddresses'  => array_map( array( Message::class, 'format_address' ), $message->to() ),
-					'CcAddresses'  => array_map( array( Message::class, 'format_address' ), $message->cc() ),
-					'BccAddresses' => array_map( array( Message::class, 'format_address' ), $message->bcc() ),
+					'ToAddresses'  => array_column( $message->to(), 'email' ),
+					'CcAddresses'  => array_column( $message->cc(), 'email' ),
+					'BccAddresses' => array_column( $message->bcc(), 'email' ),
 				),
 				'Content'     => array(
 					'Raw' => array(

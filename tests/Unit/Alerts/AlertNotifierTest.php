@@ -42,6 +42,20 @@ class AlertNotifierTest extends TestCase {
 		return new AlertNotifier( $settings, $http ? $http : \Mockery::mock( HttpClient::class ) );
 	}
 
+	public function test_defer_queues_only_the_first_failure_until_shutdown() {
+		$this->config = array( 'alert_email' => 'ops@example.com' );
+		$notifier     = $this->notifier();
+
+		Functions\expect( 'wp_mail' )->once()->with( 'ops@example.com', \Mockery::any(), \Mockery::pattern( '/could not send "Hello": first/' ) )->andReturn( true );
+
+		$notifier->defer( $this->message(), 'first' );
+		$notifier->defer( $this->message(), 'second' );
+		$this->assertNotFalse( has_action( 'shutdown', array( $notifier, 'flush' ) ) );
+
+		$this->assertSame( array( 'email' ), $notifier->flush() );
+		$this->assertSame( array(), $notifier->flush(), 'nothing left to send' );
+	}
+
 	public function test_nothing_configured_means_no_alert_and_no_lock() {
 		$this->assertSame( array(), $this->notifier()->notify( $this->message(), 'boom' ) );
 		$this->assertSame( array(), $this->transients );
@@ -109,7 +123,8 @@ class AlertNotifierTest extends TestCase {
 						&& 'https://www.example.com/' === $data['url'];
 				}
 			),
-			10
+			10,
+			true
 		)->andReturn( array( 'status' => 200, 'body' => 'ok' ) );
 
 		$this->assertSame( array( 'webhook' ), $this->notifier( $http )->notify( null, 'API down' ) );

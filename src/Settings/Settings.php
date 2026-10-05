@@ -355,6 +355,12 @@ class Settings {
 		$same_type = isset( $previous['type'] ) && $previous['type'] === $type;
 		$clean     = array( 'type' => $type );
 
+		// The admin form nests fields under their type (primary[ses][region]);
+		// programmatic callers may pass them flat (primary[region]).
+		if ( isset( $submitted[ $type ] ) && is_array( $submitted[ $type ] ) ) {
+			$submitted = $submitted[ $type ];
+		}
+
 		foreach ( $types[ $type ]['fields'] as $field => $meta ) {
 			$raw = isset( $submitted[ $field ] ) ? $submitted[ $field ] : null;
 

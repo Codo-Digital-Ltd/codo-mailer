@@ -86,6 +86,19 @@ abstract class AbstractHttpTransport implements TransportInterface {
 	}
 
 	/**
+	 * JSON APIs (Postmark, Brevo, SendGrid) require at least one To address.
+	 *
+	 * @param Message $message Message.
+	 * @return void
+	 * @throws TransportException When there is no To recipient.
+	 */
+	protected function require_to( Message $message ) {
+		if ( empty( $message->to() ) ) {
+			throw new TransportException( esc_html( sprintf( '%s requires at least one To recipient (Cc/Bcc-only messages are not supported).', $this->label() ) ) );
+		}
+	}
+
+	/**
 	 * Read attachments for JSON APIs.
 	 *
 	 * @param Message $message Message.

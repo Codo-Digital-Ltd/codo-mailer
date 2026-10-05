@@ -41,6 +41,8 @@ final class PostmarkTransport extends AbstractHttpTransport {
 	 * @throws TransportException On failure.
 	 */
 	protected function deliver( Message $message ) {
+		$this->require_to( $message );
+
 		$format = array( Message::class, 'format_address' );
 		$data   = array(
 			'From'    => Message::format_address(

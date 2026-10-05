@@ -48,13 +48,24 @@ class SesTransportTest extends HttpTransportTestCase {
 		$this->assertSame( gmdate( 'Ymd\THis\Z', 1790000000 ), $this->request['headers']['x-amz-date'] );
 
 		$body = $this->json_body();
-		$this->assertSame( array( '"Jane Doe" <jane@example.org>' ), $body['Destination']['ToAddresses'] );
+		$this->assertSame( array( 'jane@example.org' ), $body['Destination']['ToAddresses'], 'bare addresses; names are in the MIME' );
 		$this->assertSame( array( 'cc@example.org' ), $body['Destination']['CcAddresses'] );
 		$this->assertSame( array( 'hidden@example.org' ), $body['Destination']['BccAddresses'] );
 
 		$mime = base64_decode( $body['Content']['Raw']['Data'] );
 		$this->assertStringContainsString( 'Subject: Hello', $mime );
 		$this->assertStringNotContainsString( 'hidden@example.org', $mime );
+	}
+
+	public function test_non_ascii_display_names_are_encoded_in_mime_not_destination() {
+		$message = $this->message( array( 'to' => array( array( 'email' => 'jose@example.org', 'name' => 'José Núñez' ) ) ) );
+		$this->transport( $this->http( 200, '{}' ) )->send( $message );
+
+		$body = $this->json_body();
+		$this->assertSame( array( 'jose@example.org' ), $body['Destination']['ToAddresses'] );
+		$mime = base64_decode( $body['Content']['Raw']['Data'] );
+		$this->assertStringContainsString( 'To: =?', $mime, 'RFC 2047 encoded-word' );
+		$this->assertStringNotContainsString( 'José', explode( "\r\n\r\n", $mime )[0] );
 	}
 
 	public function test_default_clock_is_the_current_time() {

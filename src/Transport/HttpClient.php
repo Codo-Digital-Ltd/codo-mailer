@@ -22,11 +22,14 @@ class HttpClient {
 	 * @param array<string, string> $headers Request headers.
 	 * @param string                $body    Request body.
 	 * @param int                   $timeout Timeout in seconds.
+	 * @param bool                  $safe    Refuse local/private hosts (for user-supplied URLs).
 	 * @return array{status: int, body: string}
 	 * @throws TransportException On a network-level error.
 	 */
-	public function request( $method, $url, array $headers, $body, $timeout = 15 ) {
-		$response = wp_remote_request(
+	public function request( $method, $url, array $headers, $body, $timeout = 15, $safe = false ) {
+		$function = $safe ? 'wp_safe_remote_request' : 'wp_remote_request';
+		$response = call_user_func(
+			$function,
 			$url,
 			array(
 				'method'      => $method,

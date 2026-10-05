@@ -94,7 +94,7 @@ class LogRepository {
 			require_once ABSPATH . 'wp-admin/includes/upgrade.php'; // @codeCoverageIgnore
 		}
 		dbDelta( $sql );
-		update_option( self::DB_VERSION_OPTION, self::DB_VERSION, false );
+		update_option( self::DB_VERSION_OPTION, self::DB_VERSION, true ); // Read on every request by maybe_install().
 	}
 
 	/**

@@ -34,6 +34,15 @@ class HttpClientTest extends TestCase {
 		$this->assertSame( array( 'status' => 202, 'body' => 'ok' ), $response );
 	}
 
+	public function test_safe_requests_use_wp_safe_remote_request() {
+		Functions\expect( 'wp_safe_remote_request' )->once()->andReturn( array() );
+		Functions\expect( 'wp_remote_request' )->never();
+		Functions\when( 'wp_remote_retrieve_response_code' )->justReturn( 200 );
+		Functions\when( 'wp_remote_retrieve_body' )->justReturn( '' );
+
+		$this->assertSame( 200, ( new HttpClient() )->request( 'POST', 'https://hooks.example.com', array(), '', 10, true )['status'] );
+	}
+
 	public function test_network_error_throws() {
 		Functions\when( 'wp_remote_request' )->justReturn( new \WP_Error( 'http_request_failed', 'cURL error 28: timed out' ) );
 

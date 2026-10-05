@@ -41,6 +41,8 @@ final class BrevoTransport extends AbstractHttpTransport {
 	 * @throws TransportException On failure.
 	 */
 	protected function deliver( Message $message ) {
+		$this->require_to( $message );
+
 		$sender = array( 'email' => $message->from_email() );
 		if ( '' !== $message->from_name() ) {
 			$sender['name'] = $message->from_name();

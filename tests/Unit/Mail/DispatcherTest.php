@@ -130,7 +130,7 @@ class DispatcherTest extends TestCase {
 		);
 		Actions\expectDone( 'codo_mailer_sent' )->once();
 		Actions\expectDone( 'wp_mail_failed' )->never();
-		$this->alerts->shouldNotReceive( 'notify' );
+		$this->alerts->shouldNotReceive( 'defer' );
 
 		$this->assertTrue( $this->dispatcher()->filter_pre_wp_mail( null, $this->atts() ) );
 
@@ -148,7 +148,7 @@ class DispatcherTest extends TestCase {
 		$this->connections['backup'] = array( 'type' => 'ses' );
 		$this->transport( 'smtp', SendResult::failure( 'Connection refused' ) );
 		$this->transport( 'ses', SendResult::success() );
-		$this->alerts->shouldNotReceive( 'notify' );
+		$this->alerts->shouldNotReceive( 'defer' );
 
 		$this->assertTrue( $this->dispatcher()->filter_pre_wp_mail( null, $this->atts() ) );
 
@@ -172,7 +172,7 @@ class DispatcherTest extends TestCase {
 				}
 			)
 		);
-		$this->alerts->shouldReceive( 'notify' )->once()->with( \Mockery::type( \CodoDigital\Mailer\Mail\Message::class ), 'Primary smtp: Auth failed Backup ses: Throttled' );
+		$this->alerts->shouldReceive( 'defer' )->once()->with( \Mockery::type( \CodoDigital\Mailer\Mail\Message::class ), 'Primary smtp: Auth failed Backup ses: Throttled' );
 
 		$this->assertFalse( $this->dispatcher()->filter_pre_wp_mail( null, $this->atts() ) );
 		$this->assertSame( 'failed', $this->logged[0]['status'] );
@@ -181,7 +181,7 @@ class DispatcherTest extends TestCase {
 
 	public function test_primary_type_without_a_transport_is_reported() {
 		$this->connections['primary'] = array( 'type' => 'smtp' );
-		$this->alerts->shouldReceive( 'notify' )->once();
+		$this->alerts->shouldReceive( 'defer' )->once();
 
 		$this->assertFalse( $this->dispatcher()->send( $this->message() ) );
 		$this->assertSame( 'No primary connection is configured.', $this->logged[0]['error'] );
@@ -189,7 +189,7 @@ class DispatcherTest extends TestCase {
 
 	public function test_invalid_wp_mail_arguments_are_logged_without_content_and_alerted() {
 		Actions\expectDone( 'wp_mail_failed' )->once();
-		$this->alerts->shouldReceive( 'notify' )->once()->with( null, 'No valid recipient address.' );
+		$this->alerts->shouldReceive( 'defer' )->once()->with( null, 'No valid recipient address.' );
 
 		$this->assertFalse( $this->dispatcher()->filter_pre_wp_mail( null, $this->atts( array( 'to' => 'nope' ) ) ) );
 
@@ -201,7 +201,7 @@ class DispatcherTest extends TestCase {
 
 	public function test_escaped_exception_text_is_logged_as_plain_text() {
 		Filters\expectApplied( 'wp_mail_from' )->andReturn( 'bad"from' );
-		$this->alerts->shouldReceive( 'notify' )->once()->with( null, 'Invalid From address "bad"from".' );
+		$this->alerts->shouldReceive( 'defer' )->once()->with( null, 'Invalid From address "bad"from".' );
 
 		$this->assertFalse( $this->dispatcher()->filter_pre_wp_mail( null, $this->atts() ) );
 		$this->assertSame( 'Invalid From address "bad"from".', $this->logged[0]['error'] );
@@ -209,14 +209,14 @@ class DispatcherTest extends TestCase {
 
 	public function test_non_array_atts_are_handled() {
 		Actions\expectDone( 'wp_mail_failed' )->once();
-		$this->alerts->shouldReceive( 'notify' )->once();
+		$this->alerts->shouldReceive( 'defer' )->once();
 		$this->assertFalse( $this->dispatcher()->filter_pre_wp_mail( null, 'garbage' ) );
 		$this->assertSame( '', $this->logged[0]['subject'] );
 	}
 
 	public function test_invalid_arguments_with_logging_off_still_fail_and_alert() {
 		$this->config['log_enabled'] = false;
-		$this->alerts->shouldReceive( 'notify' )->once();
+		$this->alerts->shouldReceive( 'defer' )->once();
 		$this->assertFalse( $this->dispatcher()->filter_pre_wp_mail( null, $this->atts( array( 'to' => '' ) ) ) );
 		$this->assertSame( array(), $this->logged );
 	}
@@ -265,7 +265,7 @@ class DispatcherTest extends TestCase {
 			}
 		);
 		$real = new AlertNotifier( $settings, \Mockery::mock( \CodoDigital\Mailer\Transport\HttpClient::class ) );
-		$this->alerts->shouldReceive( 'notify' )->once()->andReturnUsing( array( $real, 'notify' ) );
+		$this->alerts->shouldReceive( 'defer' )->once()->andReturnUsing( array( $real, 'notify' ) );
 
 		$this->assertFalse( $dispatcher->filter_pre_wp_mail( null, $this->atts() ) );
 		$this->assertCount( 2, $this->logged, 'original + failed alert, no loop' );
@@ -349,7 +349,7 @@ class DispatcherTest extends TestCase {
 
 	public function test_failed_resend_reports_an_error() {
 		$this->transport( 'smtp', SendResult::failure( 'still down' ) );
-		$this->alerts->shouldReceive( 'notify' )->once();
+		$this->alerts->shouldReceive( 'defer' )->once();
 		$this->assertSame( 'Resending failed. The new attempt has been logged.', $this->dispatcher()->resend( $this->entry() ) );
 	}
 }

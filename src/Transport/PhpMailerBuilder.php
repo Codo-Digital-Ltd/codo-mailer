@@ -110,8 +110,13 @@ class PhpMailerBuilder {
 	public function build_mime( Message $message ) {
 		try {
 			$mailer = $this->build( $message );
+
+			/** This action is documented in wp-includes/pluggable.php (lets DKIM and similar plugins sign the MIME). */
+			do_action_ref_array( 'phpmailer_init', array( &$mailer ) ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- core hook.
+
 			// SMTP mode keeps Bcc out of the headers (mail/sendmail modes add
-			// it). preSend() only builds the message; nothing connects.
+			// it), even if a phpmailer_init callback changed the mode.
+			// preSend() only builds the message; nothing connects.
 			$mailer->isSMTP();
 			$mailer->preSend();
 			return $mailer->getSentMIMEMessage();

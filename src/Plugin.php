@@ -124,6 +124,7 @@ final class Plugin {
 		$this->log->maybe_install();
 		$this->dispatcher->register();
 		add_action( self::CRON_HOOK, array( $this, 'purge_log' ) );
+		self::schedule_purge();
 
 		if ( is_admin() ) {
 			$this->admin->register();
@@ -146,6 +147,16 @@ final class Plugin {
 	 */
 	public static function activate() {
 		self::create()->log->install();
+		self::schedule_purge();
+	}
+
+	/**
+	 * Schedule the daily purge if missing. Also called on every load, so each
+	 * site of a network gets its own schedule, not just the one activated on.
+	 *
+	 * @return void
+	 */
+	public static function schedule_purge() {
 		if ( ! wp_next_scheduled( self::CRON_HOOK ) ) {
 			wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', self::CRON_HOOK );
 		}

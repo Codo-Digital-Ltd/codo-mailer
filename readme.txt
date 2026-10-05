@@ -34,14 +34,14 @@ API providers are used over HTTPS, so blocked SMTP ports on your host don't matt
 * **Failure alerts** by email and/or webhook (a Slack incoming webhook works as-is), at most one per hour.
 * **Send a test email** from the settings screen.
 * **From address control**, with an option to override other plugins' senders.
-* Works with WooCommerce, contact form plugins and anything else that uses `wp_mail()`. Core hooks such as `wp_mail_from`, `wp_mail_failed` and `phpmailer_init` keep working.
+* Works with WooCommerce, contact form plugins and anything else that uses `wp_mail()`. Core hooks such as `wp_mail_from`, `wp_mail_content_type`, `wp_mail_succeeded` and `wp_mail_failed` keep working. `phpmailer_init` (used by DKIM-signing plugins) runs for SMTP, Amazon SES and Mailgun, which send full MIME; Postmark, Brevo and SendGrid build the message on their side.
 
 = Secure by default =
 
 Email logs hold password-reset links, so a leaky log is a site takeover waiting to happen. Codo Mailer is designed around that:
 
-* Password-reset and one-time login links are **redacted** before an email is logged, and those emails cannot be resent from the log.
-* The log is only ever shown on the admin screen to users with `manage_options`. There are **no REST or AJAX endpoints** for it.
+* Password-reset, set-password and email-confirmation links, one-time tokens and plaintext "Password:" lines are **redacted** before an email is logged, and those emails cannot be resent from the log. Redaction is best-effort, so as a fail-safe, if a secret still shows up once the body is decoded, the whole body is left out of the log.
+* The log is only ever shown on the admin screen to administrators (`manage_options`; on multisite, super admins only, because whoever controls mail can read any user's reset email). There are **no REST or AJAX endpoints** for it.
 * API keys and passwords are **encrypted at rest** (libsodium), so a database dump alone does not reveal them.
 * Or keep credentials out of the database entirely with **`wp-config.php` constants**.
 * Logs are deleted after 30 days by default.
@@ -69,16 +69,17 @@ define( 'CODO_MAILER_ALERT_EMAIL', 'ops@example.co.uk' );
 
 Connection field names: SMTP `host`, `port`, `encryption` (tls, ssl, none), `auth`, `username`, `password`; SES `region`, `access_key`, `secret_key`; Postmark `server_token`, `message_stream`; Mailgun `domain`, `api_key`, `region` (eu, us); Brevo and SendGrid `api_key`.
 
-To use your own encryption key instead of the site salts, define `CODO_MAILER_ENCRYPTION_KEY`.
+To use your own encryption key instead of the site salts, define `CODO_MAILER_ENCRYPTION_KEY`. If you rotate your salts without one, re-enter saved API keys and passwords (secrets set as constants are unaffected).
 
 = For developers =
 
 * `codo_mailer_redaction_patterns` filter: add regular expressions for other secret links (e.g. magic-login tokens).
 * `codo_mailer_transport` filter: provide a transport for a custom connection type.
 * `codo_mailer_alert_interval` filter: change the alert throttle (seconds).
+* `codo_mailer_capability` filter: change who can manage the plugin.
 * `codo_mailer_sent` action: fires after delivery with the message, connection and provider result.
 
-Source, issues and tests: [github.com/cododigital/codo-mailer](https://github.com/cododigital/codo-mailer).
+Source, issues and tests: [github.com/Codo-Digital-Ltd/codo-mailer](https://github.com/Codo-Digital-Ltd/codo-mailer).
 
 == Installation ==
 
@@ -113,7 +114,15 @@ No. It talks only to the email provider (and alert webhook) you configure.
 
 = Is it multisite compatible? =
 
-Each site has its own settings and log. Network-wide constants in `wp-config.php` apply to every site.
+Yes. Each site has its own settings and log, managed by super admins only. Constants in `wp-config.php` apply to every site in the network.
+
+= Can I send an email with only Bcc recipients? =
+
+Over SMTP, Amazon SES and Mailgun, yes. Postmark, Brevo and SendGrid require at least one To address and will report an error.
+
+= Will a failure slow my site down? =
+
+Each provider call times out after 15 seconds. Failure alerts are sent at the end of the request, after the page has been delivered where the server supports it, so visitors don't wait for them.
 
 == External services ==
 
