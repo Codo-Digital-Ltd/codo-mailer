@@ -98,30 +98,45 @@ class PhpMailerBuilder {
 	}
 
 	/**
-	 * Build the full RFC 5322 message (headers + body) without sending.
+	 * Build the full RFC 5322 message (headers + body) without sending, plus
+	 * the envelope recipients.
 	 *
 	 * Bcc recipients are not included in the headers, as per the standard;
-	 * callers must pass them to the provider as envelope recipients.
+	 * callers must pass `recipients` to the provider as the envelope. They
+	 * are read back after phpmailer_init, so addresses a callback adds
+	 * (e.g. "Bcc the admin" snippets) are delivered too.
 	 *
 	 * @param Message $message Message.
-	 * @return string
+	 * @return array{mime: string, recipients: string[]}
 	 * @throws TransportException When the message cannot be built.
 	 */
 	public function build_mime( Message $message ) {
 		try {
 			$mailer = $this->build( $message );
+		} catch ( \PHPMailer\PHPMailer\Exception $e ) {
+			throw new TransportException( esc_html( 'Could not build MIME message: ' . $e->getMessage() ), 0, $e ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- escaped; the previous exception is not output.
+		}
 
+		try {
 			/** This action is documented in wp-includes/pluggable.php (lets DKIM and similar plugins sign the MIME). */
 			do_action_ref_array( 'phpmailer_init', array( &$mailer ) ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- core hook.
+		} catch ( \Throwable $e ) {
+			throw new TransportException( esc_html( 'A phpmailer_init callback failed: ' . $e->getMessage() ), 0, $e ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- escaped; the previous exception is not output.
+		}
 
+		try {
 			// SMTP mode keeps Bcc out of the headers (mail/sendmail modes add
 			// it), even if a phpmailer_init callback changed the mode.
 			// preSend() only builds the message; nothing connects.
 			$mailer->isSMTP();
 			$mailer->preSend();
-			return $mailer->getSentMIMEMessage();
 		} catch ( \PHPMailer\PHPMailer\Exception $e ) {
 			throw new TransportException( esc_html( 'Could not build MIME message: ' . $e->getMessage() ), 0, $e ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- escaped; the previous exception is not output.
 		}
+
+		return array(
+			'mime'       => $mailer->getSentMIMEMessage(),
+			'recipients' => array_values( array_map( 'strval', array_keys( $mailer->getAllRecipientAddresses() ) ) ),
+		);
 	}
 }

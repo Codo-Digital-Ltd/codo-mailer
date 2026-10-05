@@ -53,7 +53,10 @@ class PhpMailerBuilderTest extends TestCase {
 			)
 		);
 
-		$mime = ( new PhpMailerBuilder() )->build_mime( $message );
+		$raw  = ( new PhpMailerBuilder() )->build_mime( $message );
+		$mime = $raw['mime'];
+
+		$this->assertSame( array( 'jane@example.org', 'secret@example.org' ), $raw['recipients'], 'Bcc is an envelope recipient' );
 
 		$this->assertStringContainsString( 'To: Jane Doe <jane@example.org>', $mime );
 		$this->assertStringContainsString( 'From: Example Site <site@example.com>', $mime );
@@ -61,6 +64,43 @@ class PhpMailerBuilderTest extends TestCase {
 		$this->assertStringContainsString( 'Plain body', $mime );
 		$this->assertStringNotContainsString( 'secret@example.org', $mime );
 		$this->assertStringNotContainsString( 'PHPMailer', $mime, 'X-Mailer banner suppressed' );
+	}
+
+	public function test_phpmailer_init_runs_and_its_recipients_join_the_envelope() {
+		\Brain\Monkey\Actions\expectDone( 'phpmailer_init' )->once()->whenHappen(
+			static function ( $mailer ) {
+				$mailer->addBCC( 'admin@example.com' );
+				$mailer->Mailer = 'sendmail'; // A callback switching mode must not leak Bcc into headers.
+			}
+		);
+
+		$raw = ( new PhpMailerBuilder() )->build_mime( $this->message() );
+
+		$this->assertContains( 'admin@example.com', $raw['recipients'] );
+		$this->assertStringNotContainsString( 'admin@example.com', $raw['mime'] );
+	}
+
+	public function test_a_throwing_phpmailer_init_callback_becomes_a_transport_error() {
+		\Brain\Monkey\Actions\expectDone( 'phpmailer_init' )->once()->whenHappen(
+			static function () {
+				throw new \Error( 'Call to undefined function dkim_sign()' );
+			}
+		);
+
+		$this->expectException( TransportException::class );
+		$this->expectExceptionMessage( 'A phpmailer_init callback failed: Call to undefined function dkim_sign()' );
+		( new PhpMailerBuilder() )->build_mime( $this->message() );
+	}
+
+	public function test_invalid_address_while_building_mime_is_a_transport_error() {
+		$this->expectException( TransportException::class );
+		( new PhpMailerBuilder() )->build_mime( $this->message( array( 'from_email' => 'not-an-address' ) ) );
+	}
+
+	public function test_message_without_any_recipient_cannot_be_built() {
+		$this->expectException( TransportException::class );
+		$this->expectExceptionMessage( 'Could not build MIME message' );
+		( new PhpMailerBuilder() )->build_mime( $this->message( array( 'to' => array() ) ) );
 	}
 
 	public function test_build_mime_wraps_phpmailer_errors() {

@@ -34,21 +34,35 @@ final class Redactor {
 		$count    = 0;
 		$clean    = (string) $body;
 
+		$withheld = array(
+			'body'     => self::WITHHELD,
+			'redacted' => true,
+		);
+
 		foreach ( $patterns as $pattern ) {
-			$replaced = preg_replace( $pattern, self::PLACEHOLDER, $clean, -1, $hits );
-			if ( null !== $replaced ) {
-				$clean  = $replaced;
-				$count += $hits;
+			preg_match( '/^/', '' ); // Reset preg_last_error() from any earlier call.
+			$replaced = @preg_replace( $pattern, self::PLACEHOLDER, $clean, -1, $hits ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- a failing pattern is handled below.
+			if ( null === $replaced || PREG_NO_ERROR !== preg_last_error() ) {
+				// Fail closed: if a pattern can't run (bad filter pattern,
+				// backtrack/JIT limit on a huge body), log no body at all.
+				return $withheld;
 			}
+			$clean  = $replaced;
+			$count += $hits;
 		}
 
-		$decoded = html_entity_decode( rawurldecode( $clean ), ENT_QUOTES | ENT_HTML5, 'UTF-8' );
+		// Fail-safe: decode (repeatedly, for double encoding) and re-check.
+		$decoded = $clean;
+		for ( $i = 0; $i < 3; $i++ ) {
+			$next = html_entity_decode( rawurldecode( $decoded ), ENT_QUOTES | ENT_HTML5, 'UTF-8' );
+			if ( $next === $decoded ) {
+				break;
+			}
+			$decoded = $next;
+		}
 		foreach ( $patterns as $pattern ) {
-			if ( preg_match( $pattern, $decoded ) ) {
-				return array(
-					'body'     => self::WITHHELD,
-					'redacted' => true,
-				);
+			if ( 0 !== @preg_match( $pattern, $decoded ) ) { // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- 1 (match) and false (error) both withhold.
+				return $withheld;
 			}
 		}
 
@@ -74,9 +88,10 @@ final class Redactor {
 			// Password reset, set-password and new-account links (core, WooCommerce).
 			'~' . $url . $sep . 'action=(?:rp|resetpass|newaccount)' . $url . '~i',
 			// Any URL carrying a reset key, confirmation hash or one-time token.
-			'~' . $url . $sep . '(?:key|reset_key|activation_key|confirm_key|adminhash|newuseremail|hash|mkey|token|login_token|magic_token|otp)=[^\s"\'<>&]+' . $url . '~i',
-			// Plaintext passwords ("Password: hunter2"), keeping the label.
-			'~^[ \t]*(?:<[^>]+>[ \t]*)*(?:your[ \t]+)?(?:password|passwort|mot de passe|contraseña)[ \t]*:[ \t]*(?:<[^>]+>[ \t]*)*\K(?!\[redacted)[^\s<]+~imu',
+			'~' . $url . $sep . '(?:key|reset_key|rm_key|activation_key|confirm_key|adminhash|newuseremail|mkey|token|login_token|magic_token|otp)=[^\s"\'<>&]+' . $url . '~i',
+			// Plaintext passwords, keeping the label: "Password: x", "Your password
+			// is: x", "...automatically generated: <strong>x</strong>".
+			'~\b(?:password|passwort|mot de passe|contraseña)\b[^:\n<>]{0,40}:[ \t]*(?:<[^>]+>[ \t]*)*\K(?!\[redacted)[^\s<]+~iu',
 		);
 
 		/**

@@ -56,6 +56,17 @@ class AlertNotifierTest extends TestCase {
 		$this->assertSame( array(), $notifier->flush(), 'nothing left to send' );
 	}
 
+	public function test_failure_during_shutdown_alerts_immediately() {
+		$this->config = array( 'alert_email' => 'ops@example.com' );
+		Functions\when( 'did_action' )->justReturn( 1 );
+		Functions\expect( 'wp_mail' )->once()->andReturn( true );
+
+		$notifier = $this->notifier();
+		$notifier->defer( $this->message(), 'late failure' );
+
+		$this->assertFalse( has_action( 'shutdown', array( $notifier, 'flush' ) ), 'nothing queued' );
+	}
+
 	public function test_nothing_configured_means_no_alert_and_no_lock() {
 		$this->assertSame( array(), $this->notifier()->notify( $this->message(), 'boom' ) );
 		$this->assertSame( array(), $this->transients );

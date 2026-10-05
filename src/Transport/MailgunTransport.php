@@ -66,14 +66,15 @@ final class MailgunTransport extends AbstractHttpTransport {
 		$host     = isset( $this->config['region'] ) && 'us' === $this->config['region'] ? 'api.mailgun.net' : 'api.eu.mailgun.net';
 		$url      = 'https://' . $host . '/v3/' . rawurlencode( $domain ) . '/messages.mime';
 		$boundary = 'codo-mailer-' . bin2hex( random_bytes( 12 ) );
+		$raw      = $this->mime->build_mime( $message );
 
 		$body  = '--' . $boundary . "\r\n";
 		$body .= "Content-Disposition: form-data; name=\"to\"\r\n\r\n";
-		$body .= implode( ',', $message->all_recipient_emails() ) . "\r\n";
+		$body .= implode( ',', $raw['recipients'] ) . "\r\n";
 		$body .= '--' . $boundary . "\r\n";
 		$body .= "Content-Disposition: form-data; name=\"message\"; filename=\"message.mime\"\r\n";
 		$body .= "Content-Type: message/rfc822\r\n\r\n";
-		$body .= $this->mime->build_mime( $message ) . "\r\n";
+		$body .= $raw['mime'] . "\r\n";
 		$body .= '--' . $boundary . "--\r\n";
 
 		$response = $this->http->request(

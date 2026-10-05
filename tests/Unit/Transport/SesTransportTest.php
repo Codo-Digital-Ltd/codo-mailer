@@ -48,9 +48,7 @@ class SesTransportTest extends HttpTransportTestCase {
 		$this->assertSame( gmdate( 'Ymd\THis\Z', 1790000000 ), $this->request['headers']['x-amz-date'] );
 
 		$body = $this->json_body();
-		$this->assertSame( array( 'jane@example.org' ), $body['Destination']['ToAddresses'], 'bare addresses; names are in the MIME' );
-		$this->assertSame( array( 'cc@example.org' ), $body['Destination']['CcAddresses'] );
-		$this->assertSame( array( 'hidden@example.org' ), $body['Destination']['BccAddresses'] );
+		$this->assertSame( array( 'jane@example.org', 'cc@example.org', 'hidden@example.org' ), $body['Destination']['ToAddresses'], 'bare envelope addresses; headers are in the MIME' );
 
 		$mime = base64_decode( $body['Content']['Raw']['Data'] );
 		$this->assertStringContainsString( 'Subject: Hello', $mime );

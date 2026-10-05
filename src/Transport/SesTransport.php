@@ -81,18 +81,19 @@ final class SesTransport extends AbstractHttpTransport {
 			throw new TransportException( esc_html( sprintf( 'Invalid AWS region "%s".', $region ) ) );
 		}
 
+		$raw  = $this->mime->build_mime( $message );
 		$body = $this->json(
 			array(
-				// Bare addresses: display names live in the MIME headers, where
-				// PHPMailer RFC 2047-encodes them; SES rejects raw non-ASCII here.
+				// The envelope: every recipient as a bare address (display names
+				// live in the MIME headers, RFC 2047-encoded; SES rejects raw
+				// non-ASCII here). Which header each one appears in comes from
+				// the MIME, so they can all be listed as ToAddresses.
 				'Destination' => array(
-					'ToAddresses'  => array_column( $message->to(), 'email' ),
-					'CcAddresses'  => array_column( $message->cc(), 'email' ),
-					'BccAddresses' => array_column( $message->bcc(), 'email' ),
+					'ToAddresses' => $raw['recipients'],
 				),
 				'Content'     => array(
 					'Raw' => array(
-						'Data' => base64_encode( $this->mime->build_mime( $message ) ), // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode -- required by SES.
+						'Data' => base64_encode( $raw['mime'] ), // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode -- required by SES.
 					),
 				),
 			)

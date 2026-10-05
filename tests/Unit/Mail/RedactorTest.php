@@ -58,6 +58,11 @@ class RedactorTest extends TestCase {
 			'admin email change'         => array( 'https://e.com/wp-admin/options.php?adminhash=ADMINHASH9', 'ADMINHASH9' ),
 			'user request confirmation'  => array( 'https://e.com/wp-login.php?action=confirmaction&request_id=5&confirm_key=CONFKEY', 'CONFKEY' ),
 			'membership plugin key'      => array( 'https://e.com/account/?mkey=MEMBERKEY', 'MEMBERKEY' ),
+			'recovery mode link'         => array( 'https://e.com/wp-login.php?action=enter_recovery_mode&rm_token=a&rm_key=RMKEY', 'RMKEY' ),
+			'password phrase'            => array( 'Your password is: Phr4seP4ss', 'Phr4seP4ss' ),
+			'woocommerce generated'      => array( '<p>Your password has been automatically generated: <strong>WooGen123</strong></p>', 'WooGen123' ),
+			'minified html'              => array( '<p>Hi Jo,</p><p>Username: jo</p><p>Password: Min1fied</p>', 'Min1fied' ),
+			'double url-encoded link'    => array( 'https://t.example/c?u=https%253A%252F%252Fe.com%252Fwp-login.php%253Faction%253Drp%2526key%253DDBLKEY', 'DBLKEY' ),
 		);
 	}
 
@@ -69,6 +74,36 @@ class RedactorTest extends TestCase {
 	public function test_password_label_is_kept_and_prose_mentions_are_not_redacted() {
 		$result = ( new Redactor() )->redact( "Your password was changed.\nPassword: hunter2" );
 		$this->assertSame( "Your password was changed.\nPassword: " . Redactor::PLACEHOLDER, $result['body'] );
+	}
+
+	public function test_pcre_limit_errors_fail_closed() {
+		// A pattern that exhausts the backtrack limit (as a huge body can).
+		Filters\expectApplied( 'codo_mailer_redaction_patterns' )->andReturnUsing(
+			static function ( $patterns ) {
+				$patterns[] = '/(a+)+$/';
+				return $patterns;
+			}
+		);
+		$limit = ini_get( 'pcre.backtrack_limit' );
+		$jit   = ini_get( 'pcre.jit' );
+		ini_set( 'pcre.backtrack_limit', '1000' );
+		ini_set( 'pcre.jit', '0' );
+		try {
+			$result = ( new Redactor() )->redact( 'Password: hunter2 ' . str_repeat( 'a', 40 ) . 'b' );
+		} finally {
+			ini_set( 'pcre.backtrack_limit', $limit );
+			ini_set( 'pcre.jit', $jit );
+		}
+
+		$this->assertSame( Redactor::WITHHELD, $result['body'] );
+		$this->assertTrue( $result['redacted'] );
+	}
+
+	public function test_ordinary_tracking_hashes_are_not_redacted() {
+		$body   = 'Unsubscribe: https://e.com/unsubscribe?hash=abc123&list=7';
+		$result = ( new Redactor() )->redact( $body );
+		$this->assertFalse( $result['redacted'] );
+		$this->assertSame( $body, $result['body'] );
 	}
 
 	public function test_ordinary_email_is_untouched() {
@@ -101,8 +136,8 @@ class RedactorTest extends TestCase {
 
 	public function test_invalid_pattern_from_a_filter_does_not_break_logging() {
 		Filters\expectApplied( 'codo_mailer_redaction_patterns' )->andReturn( array( '/(unclosed' ) );
-		$result = @( new Redactor() )->redact( 'plain text' ); // phpcs:ignore -- preg warning is expected.
-		$this->assertSame( 'plain text', $result['body'] );
-		$this->assertFalse( $result['redacted'] );
+		$result = ( new Redactor() )->redact( 'plain text' );
+		$this->assertSame( Redactor::WITHHELD, $result['body'], 'fails closed' );
+		$this->assertTrue( $result['redacted'] );
 	}
 }

@@ -155,9 +155,16 @@ class AdminPage {
 		}
 		wp_register_script( 'codo-mailer-admin', false, array(), CODO_MAILER_VERSION, true );
 		wp_enqueue_script( 'codo-mailer-admin' );
+		// Plain JavaScript, no libraries and no globals: nothing can collide
+		// with another plugin's jQuery or other library versions. The page
+		// works without it (every provider's fields are simply shown).
 		wp_add_inline_script(
 			'codo-mailer-admin',
-			"document.querySelectorAll('.codo-mailer-type').forEach(function(s){var f=function(){document.querySelectorAll('[data-codo-slot=\"'+s.dataset.slot+'\"]').forEach(function(el){el.hidden=el.dataset.codoType!==s.value;});};s.addEventListener('change',f);f();});"
+			"(function(){'use strict';var each=function(list,fn){Array.prototype.forEach.call(list,fn);};"
+			. "each(document.querySelectorAll('select.codo-mailer-type'),function(select){"
+			. "var sync=function(){each(document.querySelectorAll('table[data-codo-slot=\"'+select.getAttribute('data-slot')+'\"]'),function(table){"
+			. "table.hidden=table.getAttribute('data-codo-type')!==select.value;});};"
+			. "select.addEventListener('change',sync);sync();});})();"
 		);
 	}
 

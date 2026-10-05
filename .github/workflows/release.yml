@@ -114,3 +114,31 @@ jobs:
           SVN_PASSWORD: ${{ secrets.SVN_PASSWORD }}
           SLUG: codo-mailer
           IGNORE_OTHER_FILES: true
+
+  backfill-github-release:
+    # If a past release reached WordPress.org but its GitHub release step
+    # failed, create the missing GitHub release (and zip) now.
+    name: Ensure GitHub release v${{ needs.detect.outputs.version }}
+    needs: [checks, detect]
+    if: needs.detect.outputs.is_new == 'false'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Create the release if it is missing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.detect.outputs.version }}
+        run: |
+          if gh release view "v${VERSION}" >/dev/null 2>&1; then
+            echo "v${VERSION} already has a GitHub release."
+            exit 0
+          fi
+          mkdir -p build/codo-mailer
+          rsync -a --exclude-from=.distignore ./ build/codo-mailer/
+          (cd build && zip -qr codo-mailer.zip codo-mailer)
+          gh release create "v${VERSION}" build/codo-mailer.zip \
+            --target "${GITHUB_SHA}" \
+            --title "Codo Mailer ${VERSION}" \
+            --notes "See the changelog in readme.txt. Published to https://wordpress.org/plugins/codo-mailer/"

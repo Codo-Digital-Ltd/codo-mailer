@@ -83,6 +83,11 @@ class AlertNotifier {
 	 * @return void
 	 */
 	public function defer( $message, $error ) {
+		if ( doing_action( 'shutdown' ) || did_action( 'shutdown' ) ) {
+			// Too late to queue: shutdown callbacks are already running.
+			$this->notify( $message, $error );
+			return;
+		}
 		if ( null !== $this->pending ) {
 			return;
 		}
@@ -102,13 +107,20 @@ class AlertNotifier {
 		list( $message, $error ) = $this->pending;
 		$this->pending           = null;
 
-		// Let the visitor's response finish first (PHP-FPM only).
-		// @codeCoverageIgnoreStart
+		self::finish_response();
+		return $this->notify( $message, $error );
+	}
+
+	/**
+	 * Let the visitor's response finish before slow alert work (PHP-FPM only).
+	 *
+	 * @codeCoverageIgnore
+	 * @return void
+	 */
+	private static function finish_response() {
 		if ( function_exists( 'fastcgi_finish_request' ) && ! headers_sent() ) {
 			fastcgi_finish_request();
 		}
-		// @codeCoverageIgnoreEnd
-		return $this->notify( $message, $error );
 	}
 
 	/**
