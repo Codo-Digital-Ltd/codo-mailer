@@ -20,6 +20,9 @@ name: Release
 on:
   push:
     branches: [main]
+  # Manual "Run workflow" button, e.g. for the first release after
+  # WordPress.org approves the plugin and the SVN secrets are added.
+  workflow_dispatch:
 
 permissions:
   contents: read
