@@ -1,0 +1,83 @@
+name: CI
+
+# On main, these checks run as part of the Release workflow instead.
+on:
+  push:
+    branches-ignore: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint:
+    name: Coding standards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+          tools: composer:v2
+      - run: composer install --no-interaction --no-progress
+      - name: PHP_CodeSniffer (WordPress Coding Standards + PHP 7.4 compatibility)
+        run: vendor/bin/phpcs
+      - name: Versions agree (header, constant, readme Stable tag, changelog)
+        run: php bin/check-version.php
+
+  test:
+    name: Tests (PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['7.4', '8.0', '8.1', '8.2', '8.3', '8.4']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: sodium
+          coverage: none
+          tools: composer:v2
+      - run: composer install --no-interaction --no-progress
+      - run: vendor/bin/phpunit --no-coverage
+
+  coverage:
+    name: Coverage (gate 95%)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: sodium
+          coverage: pcov
+          tools: composer:v2
+      - run: composer install --no-interaction --no-progress
+      - run: vendor/bin/phpunit --coverage-clover=build/clover.xml --coverage-text
+      - name: Enforce minimum line coverage
+        run: php bin/coverage-gate.php build/clover.xml 95
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: build/clover.xml
+
+  plugin-check:
+    name: WordPress.org Plugin Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the distributable plugin
+        run: |
+          mkdir -p build/codo-mailer
+          rsync -a --exclude-from=.distignore ./ build/codo-mailer/
+      - uses: wordpress/plugin-check-action@v1
+        with:
+          build-dir: build/codo-mailer
