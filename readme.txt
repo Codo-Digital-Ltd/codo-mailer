@@ -126,16 +126,54 @@ Each provider call times out after 15 seconds. Failure alerts are sent at the en
 
 == External services ==
 
-This plugin sends your site's outgoing email, including recipients, subject, body and attachments, to the email provider you choose in its settings. Nothing is sent until you configure a provider. Only the provider you select is contacted:
+Codo Mailer delivers your site's email through an email provider that you choose and configure. It does not contact any service until you save a connection in Settings > Codo Mailer (or define one in `wp-config.php`), and it only ever contacts the providers you have configured. It never sends data to Codo Digital.
 
-* Amazon SES (Amazon Web Services): https://aws.amazon.com/service-terms/ and https://aws.amazon.com/privacy/
-* Postmark (ActiveCampaign): https://postmarkapp.com/terms-of-service and https://postmarkapp.com/privacy-policy
-* Mailgun (Sinch): https://www.mailgun.com/legal/terms/ and https://www.mailgun.com/legal/privacy-policy/
-* Brevo: https://www.brevo.com/legal/termsofuse/ and https://www.brevo.com/legal/privacypolicy/
-* SendGrid (Twilio): https://www.twilio.com/en-us/legal/tos and https://www.twilio.com/en-us/legal/privacy
-* SMTP: the server you enter.
+**When data is sent:** every time WordPress sends an email through `wp_mail()` (for example password resets, new-user notifications, WooCommerce orders and form notifications), when you use "Send a test", and when you resend an email from the log. The primary connection is used first; the backup connection is contacted only if the primary fails.
 
-If you set an alert webhook, failure alerts (site name, URL, failed email subject and error) are posted to that URL.
+**What is sent:** the email itself: sender, recipients (To, Cc, Bcc), Reply-To, subject, body, attachments and any custom headers, plus the credentials you entered for that provider so it can authenticate the request (for Amazon SES, your access key ID and a signature made with your secret key; the secret key itself is never sent).
+
+= Amazon SES (Amazon Web Services) =
+
+Amazon Simple Email Service is an email sending service. If you choose it, each email is sent to the SES API endpoint for the region you select (`email.<region>.amazonaws.com`), signed with your access keys.
+
+* Terms: https://aws.amazon.com/service-terms/
+* Privacy: https://aws.amazon.com/privacy/
+
+= Postmark (ActiveCampaign) =
+
+Postmark is a transactional email service. If you choose it, each email is sent to `api.postmarkapp.com` with your server token.
+
+* Terms: https://postmarkapp.com/terms-of-service
+* Privacy: https://www.activecampaign.com/legal/privacy-policy
+
+= Mailgun (Sinch Email) =
+
+Mailgun is an email sending service. If you choose it, each email is sent to `api.eu.mailgun.net` (EU region) or `api.mailgun.net` (US region), depending on your setting, with your API key.
+
+* Terms: https://www.mailgun.com/legal/terms/
+* Privacy: https://www.mailgun.com/legal/privacy-policy/
+
+= Brevo =
+
+Brevo is an email and marketing platform with a transactional email API. If you choose it, each email is sent to `api.brevo.com` with your API key.
+
+* Terms: https://www.brevo.com/legal/termsofuse/
+* Privacy: https://www.brevo.com/legal/privacypolicy/
+
+= SendGrid (Twilio) =
+
+SendGrid is an email sending service. If you choose it, each email is sent to `api.sendgrid.com` with your API key.
+
+* Terms: https://www.twilio.com/en-us/legal/tos
+* Privacy: https://www.twilio.com/en-us/legal/privacy
+
+= SMTP server =
+
+If you choose SMTP, each email is sent to the SMTP server you enter (your mailbox provider, host or any other server), with the username and password you enter. Its terms and privacy policy are those of whoever runs that server.
+
+= Failure alert webhook (optional) =
+
+If you enter a webhook URL (for example a Slack incoming webhook), Codo Mailer posts a JSON alert to that URL when an email fails to send, at most once an hour by default. The alert contains the site name, site URL, the failed email's subject, the error message and the time. Nothing is posted if the field is left empty. The service's terms and privacy policy are those of whoever provides that URL; for Slack: https://slack.com/main-services-agreement and https://slack.com/trust/privacy/privacy-policy
 
 == Changelog ==
 
