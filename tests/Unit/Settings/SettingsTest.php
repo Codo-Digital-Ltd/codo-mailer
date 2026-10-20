@@ -14,6 +14,12 @@ class SettingsTest extends TestCase {
 	/** @var array<string, mixed> */
 	private $constants = array();
 
+	/** @var mixed */
+	private $pins = array();
+
+	/** @var array<int, array{0: string, 1: mixed}> */
+	private $updates = array();
+
 	/** @var Crypto */
 	private $crypto;
 
@@ -21,13 +27,26 @@ class SettingsTest extends TestCase {
 		parent::setUp();
 		$this->crypto = new Crypto( 'test-key' );
 		Functions\when( 'get_option' )->alias(
-			function () {
-				return $this->option;
+			function ( $name ) {
+				return Settings::PINS_OPTION === $name ? $this->pins : $this->option;
 			}
 		);
+
 		Functions\when( 'esc_url_raw' )->alias(
 			static function ( $url ) {
 				return false !== filter_var( $url, FILTER_VALIDATE_URL ) ? $url : '';
+			}
+		);
+	}
+
+	private function track_updates() {
+		Functions\when( 'update_option' )->alias(
+			function ( $name, $value ) {
+				$this->updates[] = array( $name, $value );
+				if ( Settings::PINS_OPTION === $name ) {
+					$this->pins = $value;
+				}
+				return true;
 			}
 		);
 	}
@@ -198,9 +217,158 @@ class SettingsTest extends TestCase {
 		$this->assertSame( 30, $this->settings()->sanitize( array() )['log_retention_days'] );
 	}
 
-	public function test_sanitize_accepts_https_webhook() {
+	public function test_sanitize_encrypts_an_https_webhook() {
 		$clean = $this->settings()->sanitize( array( 'alert_webhook' => ' https://hooks.slack.com/services/T/B/X ' ) );
-		$this->assertSame( 'https://hooks.slack.com/services/T/B/X', $clean['alert_webhook'] );
+
+		$this->assertTrue( $this->crypto->is_encrypted( $clean['alert_webhook'] ) );
+		$this->assertSame( 'https://hooks.slack.com/services/T/B/X', $this->crypto->decrypt( $clean['alert_webhook'] ) );
+
+		$this->option = $clean;
+		$this->assertSame( 'https://hooks.slack.com/services/T/B/X', $this->settings()->get( 'alert_webhook' ) );
+		$this->assertTrue( $this->settings()->has_saved_webhook() );
+	}
+
+	public function test_blank_webhook_keeps_the_saved_one_and_remove_clears_it() {
+		$saved        = $this->crypto->encrypt( 'https://hooks.example.com/x' );
+		$this->option = array( 'alert_webhook' => $saved );
+
+		$this->assertSame( $saved, $this->settings()->sanitize( array( 'alert_webhook' => '  ' ) )['alert_webhook'] );
+		$this->assertSame( '', $this->settings()->sanitize( array( 'alert_webhook' => '', 'alert_webhook_clear' => '1' ) )['alert_webhook'] );
+		$this->assertSame( '', $this->settings()->sanitize( array( 'alert_webhook' => 'http://insecure.example.com' ) )['alert_webhook'] );
+	}
+
+	public function test_plaintext_webhook_from_1_0_0_is_read_and_encrypted() {
+		$this->track_updates();
+		$this->option = array( 'alert_webhook' => 'https://hooks.example.com/legacy' );
+
+		$this->assertSame( 'https://hooks.example.com/legacy', $this->settings()->get( 'alert_webhook' ) );
+
+		$kept = $this->settings()->sanitize( array( 'alert_webhook' => '' ) )['alert_webhook'];
+		$this->assertSame( 'https://hooks.example.com/legacy', $this->crypto->decrypt( $kept ), 'resaving encrypts it' );
+
+		$this->assertTrue( $this->settings()->encrypt_legacy_secrets() );
+		$this->assertSame( Settings::OPTION, $this->updates[0][0] );
+		$this->assertSame( 'https://hooks.example.com/legacy', $this->crypto->decrypt( $this->updates[0][1]['alert_webhook'] ) );
+	}
+
+	public function test_encrypt_legacy_secrets_does_nothing_when_already_encrypted_or_empty() {
+		$this->track_updates();
+		$this->option = array( 'alert_webhook' => $this->crypto->encrypt( 'https://hooks.example.com/x' ) );
+		$this->assertFalse( $this->settings()->encrypt_legacy_secrets() );
+
+		$this->option = array( 'alert_webhook' => '' );
+		$this->assertFalse( $this->settings()->encrypt_legacy_secrets() );
+		$this->assertFalse( $this->settings()->has_saved_webhook() );
+
+		$this->option = 'corrupt';
+		$this->assertFalse( $this->settings()->encrypt_legacy_secrets() );
+		$this->assertSame( array(), $this->updates );
+	}
+
+	public function test_webhook_constant_wins_and_is_not_decrypted() {
+		$this->constants = array( 'CODO_MAILER_ALERT_WEBHOOK' => 'https://hooks.example.com/const' );
+		$this->assertSame( 'https://hooks.example.com/const', $this->settings()->get( 'alert_webhook' ) );
+	}
+
+	private function smtp_with_constant_password( array $overrides = array() ) {
+		$this->constants = array( 'CODO_MAILER_PRIMARY_PASSWORD' => 'wp-config-pass' );
+		$this->option    = array(
+			'primary' => array_merge(
+				array(
+					'type'       => 'smtp',
+					'host'       => 'smtp.example.com',
+					'port'       => 587,
+					'encryption' => 'tls',
+					'auth'       => true,
+					'username'   => 'u',
+				),
+				$overrides
+			),
+		);
+	}
+
+	public function test_constant_password_is_used_until_a_connection_is_pinned() {
+		$this->smtp_with_constant_password();
+		$config = $this->settings()->connection( 'primary' );
+
+		$this->assertSame( 'wp-config-pass', $config['password'] );
+		$this->assertArrayNotHasKey( 'error', $config );
+	}
+
+	public function test_pinned_constant_password_is_refused_for_a_different_server() {
+		$this->track_updates();
+		$this->smtp_with_constant_password();
+		$settings = $this->settings();
+		$settings->pin_connection( 'primary', $settings->connection( 'primary' ) );
+		$this->assertArrayHasKey( 'primary', $this->pins );
+
+		$this->assertSame( 'wp-config-pass', $this->settings()->connection( 'primary' )['password'], 'same server still works' );
+
+		$changes = array(
+			'host'       => 'attacker.example',
+			'port'       => 2525,
+			'encryption' => 'none',
+			'username'   => 'x',
+		);
+		foreach ( $changes as $field => $value ) {
+			$this->smtp_with_constant_password( array( $field => $value ) );
+			$config = $this->settings()->connection( 'primary' );
+
+			$this->assertSame( '', $config['password'], $field );
+			$this->assertStringContainsString( 'CODO_MAILER_PRIMARY_HOST', $config['error'], $field );
+		}
+	}
+
+	public function test_pin_is_written_once_and_not_for_stored_passwords() {
+		$this->track_updates();
+		$this->smtp_with_constant_password();
+		$settings = $this->settings();
+		$settings->pin_connection( 'primary', $settings->connection( 'primary' ) );
+		$settings->pin_connection( 'primary', $settings->connection( 'primary' ) );
+		$this->assertCount( 1, $this->updates, 'an existing pin is not rewritten' );
+
+		$this->constants = array();
+		$this->pins      = array();
+		$this->updates   = array();
+		$this->option    = array(
+			'primary' => array(
+				'type'     => 'smtp',
+				'host'     => 'h',
+				'password' => $this->crypto->encrypt( 'p' ),
+			),
+		);
+		$settings->pin_connection( 'primary', $settings->connection( 'primary' ) );
+		$settings->pin_connection( 'primary', array( 'type' => 'carrier-pigeon' ) );
+		$settings->pin_connection( 'primary', array() );
+		$this->assertSame( array(), $this->updates );
+	}
+
+	public function test_pin_is_dropped_once_the_server_is_also_set_in_wp_config() {
+		$this->track_updates();
+		$this->smtp_with_constant_password();
+		$this->pins      = array(
+			'primary' => 'stale',
+			'backup'  => 'other',
+		);
+		$this->constants = array(
+			'CODO_MAILER_PRIMARY_PASSWORD'   => 'wp-config-pass',
+			'CODO_MAILER_PRIMARY_HOST'       => 'smtp.example.com',
+			'CODO_MAILER_PRIMARY_PORT'       => 587,
+			'CODO_MAILER_PRIMARY_ENCRYPTION' => 'tls',
+			'CODO_MAILER_PRIMARY_USERNAME'   => 'u',
+		);
+		$settings        = $this->settings();
+		$config          = $settings->connection( 'primary' );
+
+		$this->assertArrayNotHasKey( 'error', $config, 'no pin check when every server field is a constant' );
+		$settings->pin_connection( 'primary', $config );
+		$this->assertSame( array( 'backup' => 'other' ), $this->pins );
+	}
+
+	public function test_corrupt_pins_option_is_ignored() {
+		$this->smtp_with_constant_password();
+		$this->pins = 'corrupt';
+		$this->assertSame( 'wp-config-pass', $this->settings()->connection( 'primary' )['password'] );
 	}
 
 	public function test_sanitize_encrypts_new_secrets_and_keeps_existing_ones_when_blank() {

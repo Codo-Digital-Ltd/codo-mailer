@@ -23,6 +23,11 @@ class Settings {
 
 	const OPTION = 'codo_mailer_settings';
 
+	/**
+	 * Fingerprints of SMTP servers that wp-config.php secrets are pinned to.
+	 */
+	const PINS_OPTION = 'codo_mailer_pins';
+
 	const SLOTS = array( 'primary', 'backup' );
 
 	/**
@@ -224,6 +229,10 @@ class Settings {
 		$constant = $this->constant( $key );
 		$value    = null !== $constant ? $constant : ( array_key_exists( $key, $this->stored() ) ? $this->stored()[ $key ] : null );
 
+		if ( 'alert_webhook' === $key && null === $constant ) {
+			$value = $this->reveal( (string) $value );
+		}
+
 		if ( ! array_key_exists( $key, $defaults ) ) {
 			return $value;
 		}
@@ -296,7 +305,124 @@ class Settings {
 			$result[ $field ] = $this->cast( $meta, $value );
 		}
 
+		// A wp-config.php secret may only go to the server it last worked
+		// with; otherwise anyone with the settings screen could redirect it.
+		$fingerprint = $this->pin_fingerprint( $slot, $type, $result );
+		$pins        = null !== $fingerprint ? $this->pins() : array();
+		if ( isset( $pins[ $slot ] ) && ! hash_equals( $pins[ $slot ], $fingerprint ) ) {
+			foreach ( $types[ $type ]['fields'] as $field => $meta ) {
+				if ( 'secret' === $meta['type'] ) {
+					$result[ $field ] = '';
+				}
+			}
+			$result['error'] = sprintf(
+				'The password for this connection is set in wp-config.php, so its host, port, encryption and username cannot be changed here. Set %1$sHOST, %1$sPORT, %1$sENCRYPTION and %1$sUSERNAME in wp-config.php instead.',
+				'CODO_MAILER_' . strtoupper( $slot ) . '_'
+			);
+		}
+
 		return $result;
+	}
+
+	/**
+	 * Pin a connection that just worked, if it uses a wp-config.php secret.
+	 *
+	 * @param string               $slot   primary|backup.
+	 * @param array<string, mixed> $config Effective connection settings.
+	 * @return void
+	 */
+	public function pin_connection( $slot, array $config ) {
+		$type = isset( $config['type'] ) ? (string) $config['type'] : '';
+		if ( ! isset( self::connection_types()[ $type ] ) ) {
+			return;
+		}
+
+		$fingerprint = $this->pin_fingerprint( $slot, $type, $config );
+		$pins        = $this->pins();
+
+		if ( null === $fingerprint ) {
+			// Nothing to protect (or every server field is a constant now).
+			if ( isset( $pins[ $slot ] ) ) {
+				unset( $pins[ $slot ] );
+				update_option( self::PINS_OPTION, $pins, false );
+			}
+			return;
+		}
+
+		if ( ! isset( $pins[ $slot ] ) ) {
+			$pins[ $slot ] = $fingerprint;
+			update_option( self::PINS_OPTION, $pins, false );
+		}
+	}
+
+	/**
+	 * Fingerprint of the server fields a constant secret is sent to.
+	 *
+	 * @param string               $slot   primary|backup.
+	 * @param string               $type   Connection type.
+	 * @param array<string, mixed> $config Effective connection settings.
+	 * @return string|null Null unless a secret is a constant and a server field is not.
+	 */
+	private function pin_fingerprint( $slot, $type, array $config ) {
+		$constant_secret = false;
+		$stored_server   = false;
+		$parts           = array( $type );
+
+		foreach ( self::connection_types()[ $type ]['fields'] as $field => $meta ) {
+			$is_constant = $this->is_connection_constant( $slot, $field );
+			if ( 'secret' === $meta['type'] && $is_constant ) {
+				$constant_secret = true;
+			}
+			if ( ! empty( $meta['binds_secret'] ) ) {
+				$parts[]       = $field . '=' . ( isset( $config[ $field ] ) ? (string) $config[ $field ] : '' );
+				$stored_server = $stored_server || ! $is_constant;
+			}
+		}
+
+		return $constant_secret && $stored_server ? hash( 'sha256', implode( "\n", $parts ) ) : null;
+	}
+
+	/**
+	 * Stored server pins, by slot.
+	 *
+	 * @return array<string, string>
+	 */
+	private function pins() {
+		$pins = get_option( self::PINS_OPTION, array() );
+		return is_array( $pins ) ? array_filter( $pins, 'is_string' ) : array();
+	}
+
+	/**
+	 * Decrypt a stored secret, passing through values saved before it was encrypted.
+	 *
+	 * @param string $value Stored value.
+	 * @return string
+	 */
+	private function reveal( $value ) {
+		return $this->crypto->is_encrypted( $value ) ? $this->crypto->decrypt( $value ) : $value;
+	}
+
+	/**
+	 * Whether an alert webhook is saved in the database.
+	 *
+	 * @return bool
+	 */
+	public function has_saved_webhook() {
+		return '' !== (string) $this->stored()['alert_webhook'];
+	}
+
+	/**
+	 * Encrypt an alert webhook saved in plain text by version 1.0.0.
+	 *
+	 * @return bool Whether anything changed.
+	 */
+	public function encrypt_legacy_secrets() {
+		$stored = get_option( self::OPTION, array() );
+		if ( ! is_array( $stored ) || empty( $stored['alert_webhook'] ) || $this->crypto->is_encrypted( (string) $stored['alert_webhook'] ) ) {
+			return false;
+		}
+		$stored['alert_webhook'] = $this->crypto->encrypt( (string) $stored['alert_webhook'] );
+		return update_option( self::OPTION, $stored, false );
 	}
 
 	/**
@@ -325,8 +451,18 @@ class Settings {
 		$alert_email          = isset( $input['alert_email'] ) ? sanitize_email( (string) $input['alert_email'] ) : '';
 		$clean['alert_email'] = is_email( $alert_email ) ? $alert_email : '';
 
-		$webhook                = isset( $input['alert_webhook'] ) ? esc_url_raw( trim( (string) $input['alert_webhook'] ), array( 'https' ) ) : '';
-		$clean['alert_webhook'] = 0 === strpos( $webhook, 'https://' ) ? $webhook : '';
+		// The webhook URL is a credential: stored encrypted and never shown
+		// again, so a blank field keeps the saved one.
+		$webhook = isset( $input['alert_webhook'] ) ? trim( (string) $input['alert_webhook'] ) : '';
+		$saved   = (string) $current['alert_webhook'];
+		if ( ! empty( $input['alert_webhook_clear'] ) ) {
+			$clean['alert_webhook'] = '';
+		} elseif ( '' === $webhook ) {
+			$clean['alert_webhook'] = '' === $saved || $this->crypto->is_encrypted( $saved ) ? $saved : $this->crypto->encrypt( $saved );
+		} else {
+			$webhook                = esc_url_raw( $webhook, array( 'https' ) );
+			$clean['alert_webhook'] = 0 === strpos( $webhook, 'https://' ) ? $this->crypto->encrypt( $webhook ) : '';
+		}
 
 		foreach ( self::SLOTS as $slot ) {
 			$submitted      = isset( $input[ $slot ] ) && is_array( $input[ $slot ] ) ? $input[ $slot ] : array();

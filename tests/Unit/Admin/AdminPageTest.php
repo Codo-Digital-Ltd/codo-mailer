@@ -18,6 +18,9 @@ class AdminPageTest extends TestCase {
 	/** @var array<string, mixed> */
 	private $constants = array();
 
+	/** @var array<string, string> */
+	private $pins = array();
+
 	/** @var array<string, mixed> */
 	private $transients = array();
 
@@ -99,8 +102,8 @@ class AdminPageTest extends TestCase {
 					$this->redirected_to = $url;
 					return true;
 				},
-				'get_option'           => function () {
-					return $this->option;
+				'get_option'           => function ( $name ) {
+					return Settings::PINS_OPTION === $name ? $this->pins : $this->option;
 				},
 				'esc_url_raw'          => static function ( $url ) {
 					return $url;
@@ -152,7 +155,7 @@ class AdminPageTest extends TestCase {
 		$page = $this->page();
 		$page->register();
 
-		foreach ( array( 'admin_menu', 'admin_enqueue_scripts', 'admin_post_codo_mailer_save', 'admin_post_codo_mailer_test', 'admin_post_codo_mailer_resend', 'admin_post_codo_mailer_clear_log' ) as $hook ) {
+		foreach ( array( 'admin_init', 'admin_menu', 'admin_enqueue_scripts', 'admin_post_codo_mailer_save', 'admin_post_codo_mailer_test', 'admin_post_codo_mailer_resend', 'admin_post_codo_mailer_clear_log' ) as $hook ) {
 			$this->assertNotFalse( has_action( $hook ), $hook );
 		}
 		$this->assertNotFalse( has_filter( 'plugin_action_links_codo-mailer/codo-mailer.php' ) );
@@ -322,6 +325,44 @@ class AdminPageTest extends TestCase {
 		$this->submit_provider( 'mailgun', array( 'domain' => 'mg.example.com', 'api_key' => 'key-1' ) );
 		$connection = $this->submit_provider( 'mailgun', array() );
 		$this->assertSame( 'key-1', $connection['api_key'], 'blank secret field keeps the saved key' );
+	}
+
+	public function test_webhook_url_is_never_printed_back() {
+		$crypto       = new Crypto( 'k' );
+		$this->option = array( 'alert_webhook' => $crypto->encrypt( 'https://hooks.slack.com/services/T/B/SECRET' ) );
+
+		$html = $this->render();
+
+		$this->assertStringNotContainsString( 'SECRET', $html );
+		$this->assertStringContainsString( 'name="codo_mailer[alert_webhook]" class="regular-text" autocomplete="off" placeholder="Saved. Leave blank to keep it."', $html );
+		$this->assertStringContainsString( 'name="codo_mailer[alert_webhook_clear]"', $html );
+	}
+
+	public function test_webhook_row_without_a_saved_url_or_with_a_constant() {
+		$html = $this->render();
+		$this->assertStringContainsString( 'placeholder="https://"', $html );
+		$this->assertStringNotContainsString( 'alert_webhook_clear', $html );
+
+		$this->constants = array( 'CODO_MAILER_ALERT_WEBHOOK' => 'https://hooks.example.com/const' );
+		$html            = $this->render();
+		$this->assertStringNotContainsString( 'hooks.example.com', $html );
+		$this->assertStringContainsString( 'placeholder="Saved. Leave blank to keep it." disabled="disabled"', $html );
+		$this->assertStringNotContainsString( 'alert_webhook_clear', $html );
+	}
+
+	public function test_connection_error_is_shown_above_the_connection() {
+		$this->constants = array( 'CODO_MAILER_PRIMARY_PASSWORD' => 'p' );
+		$this->option    = array(
+			'primary' => array(
+				'type' => 'smtp',
+				'host' => 'attacker.example',
+			),
+		);
+		$this->pins      = array( 'primary' => 'pinned-to-another-server' );
+
+		$html = $this->render();
+
+		$this->assertStringContainsString( '<div class="notice notice-error inline"><p>The password for this connection is set in wp-config.php', $html );
 	}
 
 	public function test_constant_values_are_read_only() {

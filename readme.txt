@@ -4,7 +4,7 @@ Tags: smtp, email, amazon ses, email log, deliverability
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.0
+Stable tag: 1.0.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -68,6 +68,8 @@ define( 'CODO_MAILER_ALERT_EMAIL', 'ops@example.co.uk' );
 `
 
 Connection field names: SMTP `host`, `port`, `encryption` (tls, ssl, none), `auth`, `username`, `password`; SES `region`, `access_key`, `secret_key`; Postmark `server_token`, `message_stream`; Mailgun `domain`, `api_key`, `region` (eu, us); Brevo and SendGrid `api_key`.
+
+If an SMTP password is a constant but the host, port, encryption or username are not, the first successful send locks the connection to that server. Changing any of them in the admin screen then stops the connection, so the password can't be redirected to another server. To move servers, set the new values as constants too.
 
 To use your own encryption key instead of the site salts, define `CODO_MAILER_ENCRYPTION_KEY`. If you rotate your salts without one, re-enter saved API keys and passwords (secrets set as constants are unaffected).
 
@@ -177,10 +179,22 @@ If you enter a webhook URL (for example a Slack incoming webhook), Codo Mailer p
 
 == Changelog ==
 
+= 1.0.1 =
+* Security: a password set in wp-config.php is now locked to the SMTP server it last sent through. Changing that server's host, port, encryption or username in the admin screen stops the connection until they are set in wp-config.php too.
+* Security: the alert webhook URL is now stored encrypted and never shown again after saving. Existing URLs are encrypted automatically.
+* Security: a saved SMTP password is cleared when the server it belongs to is changed.
+* Security: attachments given as stream URLs (phar://, ftp:// and so on) are ignored, and header names, content types, charsets and subjects are checked for line-break injection.
+* Fix: an unrecognised connection type now fails and is logged, instead of falling back to PHP mail().
+* Fix: an error thrown by another plugin's phpmailer_init hook no longer stops the backup connection from being tried.
+* Tested with PHPMailer 7, as bundled with WordPress 6.9 and later.
+
 = 1.0.0 =
 * First release: SMTP, Amazon SES, Postmark, Mailgun, Brevo and SendGrid; backup connection; email log with redaction and resend; email and webhook alerts; wp-config.php constants; encrypted secrets.
 
 == Upgrade Notice ==
+
+= 1.0.1 =
+Security hardening for stored credentials and message headers. Recommended for all sites.
 
 = 1.0.0 =
 First release.
