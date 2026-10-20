@@ -179,6 +179,7 @@ final class Plugin {
 	public static function uninstall() {
 		self::create()->log->drop();
 		delete_option( Settings::OPTION );
+		delete_option( Settings::PINS_OPTION );
 		delete_transient( AlertNotifier::LOCK_TRANSIENT );
 		wp_clear_scheduled_hook( self::CRON_HOOK );
 	}

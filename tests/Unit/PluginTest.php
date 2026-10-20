@@ -100,6 +100,7 @@ class PluginTest extends TestCase {
 		$this->wpdb->shouldReceive( 'query' )->once();
 		Functions\expect( 'delete_option' )->once()->with( LogRepository::DB_VERSION_OPTION );
 		Functions\expect( 'delete_option' )->once()->with( Settings::OPTION );
+		Functions\expect( 'delete_option' )->once()->with( Settings::PINS_OPTION );
 		Functions\expect( 'delete_transient' )->once()->with( AlertNotifier::LOCK_TRANSIENT );
 		Functions\expect( 'wp_clear_scheduled_hook' )->once()->with( Plugin::CRON_HOOK );
 

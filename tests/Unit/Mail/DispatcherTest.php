@@ -31,6 +31,9 @@ class DispatcherTest extends TestCase {
 	/** @var \Mockery\MockInterface */
 	private $alerts;
 
+	/** @var array<int, array{0: string, 1: array<string, mixed>}> */
+	private $pinned = array();
+
 	protected function setUp(): void {
 		parent::setUp();
 		$this->connections = array(
@@ -52,6 +55,11 @@ class DispatcherTest extends TestCase {
 		$settings->shouldReceive( 'connection' )->andReturnUsing(
 			function ( $slot ) {
 				return $this->connections[ $slot ];
+			}
+		);
+		$settings->shouldReceive( 'pin_connection' )->andReturnUsing(
+			function ( $slot, $config ) {
+				$this->pinned[] = array( $slot, $config );
 			}
 		);
 		$settings->shouldReceive( 'get' )->andReturnUsing(
@@ -185,6 +193,21 @@ class DispatcherTest extends TestCase {
 
 		$this->assertFalse( $this->dispatcher()->send( $this->message() ) );
 		$this->assertSame( 'Primary connection type "smtp" is not supported.', $this->logged[0]['error'] );
+	}
+
+	public function test_connection_with_an_error_is_skipped_and_logged() {
+		$this->connections['primary'] = array(
+			'type'  => 'smtp',
+			'error' => 'Server locked.',
+		);
+		$this->connections['backup']  = array( 'type' => 'ses' );
+		$this->transport( 'smtp', SendResult::success(), 0 );
+		$this->transport( 'ses', SendResult::success() );
+
+		$this->assertTrue( $this->dispatcher()->send( $this->message() ) );
+		$this->assertSame( 'backup:ses', $this->logged[0]['connection'] );
+		$this->assertSame( 'Primary smtp: Server locked.', $this->logged[0]['error'] );
+		$this->assertSame( array( array( 'backup', array( 'type' => 'ses' ) ) ), $this->pinned );
 	}
 
 	public function test_unknown_connection_type_fails_instead_of_falling_back_to_core() {

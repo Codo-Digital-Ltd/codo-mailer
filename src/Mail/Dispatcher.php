@@ -122,7 +122,11 @@ class Dispatcher {
 		$errors = array();
 
 		foreach ( Settings::SLOTS as $slot ) {
-			$config    = $this->settings->connection( $slot );
+			$config = $this->settings->connection( $slot );
+			if ( isset( $config['error'] ) ) {
+				$errors[] = sprintf( '%s %s: %s', ucfirst( $slot ), $config['type'], $config['error'] );
+				continue;
+			}
 			$transport = $this->transports->create( $config );
 
 			if ( null === $transport ) {
@@ -138,6 +142,7 @@ class Dispatcher {
 			$label  = $slot . ':' . $transport->name();
 
 			if ( $result->is_success() ) {
+				$this->settings->pin_connection( $slot, $config );
 				$this->record( $message, LogRepository::STATUS_SENT, $label, $source, implode( ' ', $errors ) );
 
 				$mail_data = $this->mail_data( $message, $atts );

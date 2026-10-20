@@ -84,6 +84,7 @@ class AdminPage {
 	 * @return void
 	 */
 	public function register() {
+		add_action( 'admin_init', array( $this->settings, 'encrypt_legacy_secrets' ) );
 		add_action( 'admin_menu', array( $this, 'add_menu' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue' ) );
 		add_action( 'admin_post_codo_mailer_save', array( $this, 'handle_save' ) );
@@ -282,7 +283,7 @@ class AdminPage {
 
 		echo '<h2>' . esc_html__( 'Failure alerts', 'codo-mailer' ) . '</h2><table class="form-table" role="presentation">';
 		$this->text_row( 'alert_email', __( 'Alert email', 'codo-mailer' ), 'email', __( 'Sent through the backup connection if the primary is down. At most one alert per hour.', 'codo-mailer' ) );
-		$this->text_row( 'alert_webhook', __( 'Alert webhook (https)', 'codo-mailer' ), 'url', __( 'Receives a JSON POST with a "text" field, so a Slack incoming webhook works as-is.', 'codo-mailer' ) );
+		$this->webhook_row();
 		echo '</table>';
 
 		submit_button( __( 'Save settings', 'codo-mailer' ) );
@@ -302,6 +303,9 @@ class AdminPage {
 		$title  = 'primary' === $slot ? __( 'Primary connection', 'codo-mailer' ) : __( 'Backup connection', 'codo-mailer' );
 
 		echo '<h2>' . esc_html( $title ) . '</h2>';
+		if ( isset( $config['error'] ) ) {
+			echo '<div class="notice notice-error inline"><p>' . esc_html( $config['error'] ) . '</p></div>';
+		}
 		if ( 'backup' === $slot ) {
 			echo '<p>' . esc_html__( 'Used only when the primary connection fails.', 'codo-mailer' ) . '</p>';
 		}
@@ -419,6 +423,29 @@ class AdminPage {
 			echo '<p class="description">' . esc_html( $description ) . '</p>';
 		}
 		echo '</td></tr>';
+	}
+
+	/**
+	 * The alert webhook row. The URL is a credential, so like provider
+	 * secrets it is never printed back into the page.
+	 *
+	 * @return void
+	 */
+	private function webhook_row() {
+		$locked = $this->settings->is_constant( 'alert_webhook' );
+		$saved  = $locked || $this->settings->has_saved_webhook();
+		printf(
+			'<tr><th scope="row"><label for="codo-mailer-alert_webhook">%1$s</label></th><td><input type="password" id="codo-mailer-alert_webhook" name="codo_mailer[alert_webhook]" class="regular-text" autocomplete="off" placeholder="%2$s"%3$s>',
+			esc_html__( 'Alert webhook (https)', 'codo-mailer' ),
+			esc_attr( $saved ? __( 'Saved. Leave blank to keep it.', 'codo-mailer' ) : 'https://' ),
+			disabled( $locked, true, false )
+		);
+		if ( $locked ) {
+			$this->constant_hint();
+		} elseif ( $saved ) {
+			echo ' <label><input type="checkbox" name="codo_mailer[alert_webhook_clear]" value="1"> ' . esc_html__( 'Remove', 'codo-mailer' ) . '</label>';
+		}
+		echo '<p class="description">' . esc_html__( 'Receives a JSON POST with a "text" field, so a Slack incoming webhook works as-is.', 'codo-mailer' ) . '</p></td></tr>';
 	}
 
 	/**
