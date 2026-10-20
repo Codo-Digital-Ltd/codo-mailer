@@ -179,7 +179,7 @@ abstract class AbstractHttpTransport implements TransportInterface {
 			$detail = trim( wp_strip_all_tags( (string) $body ) );
 		}
 		if ( strlen( $detail ) > 300 ) {
-			$detail = substr( $detail, 0, 300 ) . '…';
+			$detail = mb_substr( $detail, 0, 300, 'UTF-8' ) . '…';
 		}
 		throw new TransportException( esc_html( sprintf( '%s API returned HTTP %d: %s', $this->label(), $status, '' !== $detail ? $detail : 'no details' ) ) );
 	}

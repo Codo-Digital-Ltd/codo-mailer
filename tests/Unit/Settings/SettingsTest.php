@@ -128,8 +128,21 @@ class SettingsTest extends TestCase {
 		$this->assertSame( 'outbound', $connection['message_stream'] );
 	}
 
-	public function test_unknown_type_is_treated_as_none() {
+	public function test_unknown_type_is_kept_so_sending_fails_instead_of_falling_back() {
 		$this->option = array( 'primary' => array( 'type' => 'carrier-pigeon' ) );
+		$this->assertSame( array( 'type' => 'carrier-pigeon' ), $this->settings()->connection( 'primary' ) );
+	}
+
+	public function test_type_constant_is_case_insensitive() {
+		$this->constants = array(
+			'CODO_MAILER_PRIMARY_TYPE'       => ' SES ',
+			'CODO_MAILER_PRIMARY_SECRET_KEY' => 'k',
+		);
+		$this->assertSame( 'ses', $this->settings()->connection( 'primary' )['type'] );
+	}
+
+	public function test_empty_type_is_none() {
+		$this->option = array( 'primary' => array( 'type' => '' ) );
 		$this->assertSame( array( 'type' => 'none' ), $this->settings()->connection( 'primary' ) );
 	}
 
@@ -215,6 +228,48 @@ class SettingsTest extends TestCase {
 		$clean = $this->settings()->sanitize( array( 'primary' => array( 'type' => 'sendgrid', 'api_key' => '' ) ) );
 
 		$this->assertSame( '', $clean['primary']['api_key'] );
+	}
+
+	public function test_smtp_password_is_kept_while_the_server_is_unchanged() {
+		$existing     = $this->crypto->encrypt( 'smtp-pass' );
+		$server       = array( 'type' => 'smtp', 'host' => 'smtp.example.com', 'port' => 587, 'encryption' => 'tls', 'auth' => true, 'username' => 'u' );
+		$this->option = array( 'primary' => $server + array( 'password' => $existing ) );
+
+		$clean = $this->settings()->sanitize( array( 'primary' => $server + array( 'password' => '' ) ) );
+
+		$this->assertSame( $existing, $clean['primary']['password'] );
+	}
+
+	/**
+	 * @dataProvider provide_server_changes
+	 */
+	public function test_smtp_password_is_dropped_when_the_server_changes( $field, $value ) {
+		$server       = array( 'type' => 'smtp', 'host' => 'smtp.example.com', 'port' => 587, 'encryption' => 'tls', 'auth' => true, 'username' => 'u' );
+		$this->option = array( 'primary' => $server + array( 'password' => $this->crypto->encrypt( 'smtp-pass' ) ) );
+
+		$submitted           = $server;
+		$submitted[ $field ] = $value;
+		$clean               = $this->settings()->sanitize( array( 'primary' => $submitted + array( 'password' => '' ) ) );
+
+		$this->assertSame( '', $clean['primary']['password'] );
+	}
+
+	public function provide_server_changes() {
+		return array(
+			'host'       => array( 'host', 'attacker.example' ),
+			'port'       => array( 'port', 2525 ),
+			'encryption' => array( 'encryption', 'none' ),
+			'username'   => array( 'username', 'other' ),
+		);
+	}
+
+	public function test_new_smtp_password_is_stored_when_the_server_changes() {
+		$server       = array( 'type' => 'smtp', 'host' => 'smtp.example.com', 'port' => 587, 'encryption' => 'tls', 'auth' => true, 'username' => 'u' );
+		$this->option = array( 'primary' => $server + array( 'password' => $this->crypto->encrypt( 'old' ) ) );
+
+		$clean = $this->settings()->sanitize( array( 'primary' => array( 'host' => 'new.example.com', 'password' => 'new' ) + $server ) );
+
+		$this->assertSame( 'new', $this->crypto->decrypt( $clean['primary']['password'] ) );
 	}
 
 	public function test_sanitize_connection_fields_by_type() {

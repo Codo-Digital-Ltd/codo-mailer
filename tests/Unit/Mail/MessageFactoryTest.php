@@ -132,6 +132,27 @@ class MessageFactoryTest extends TestCase {
 		$this->assertSame( 'ab', $parsed['custom']['X-Test'] );
 	}
 
+	public function test_header_names_with_line_breaks_or_spaces_are_dropped() {
+		$parsed = ( new MessageFactory() )->parse_headers( array( "X-A\r\nBcc: v@example.org: y", 'Bad Name: z', 'X-Ok: 1' ) );
+		$this->assertSame( array( 'X-Ok' => '1' ), $parsed['custom'] );
+		$this->assertSame( array(), $parsed['bcc'] );
+	}
+
+	public function test_content_type_and_charset_with_injection_are_ignored() {
+		$parsed = ( new MessageFactory() )->parse_headers( array( "Content-Type: text/html; charset=utf-8\r\n\r\n<injected>" ) );
+		$this->assertSame( 'text/html', $parsed['content_type'] );
+		$this->assertNull( $parsed['charset'] );
+
+		$parsed = ( new MessageFactory() )->parse_headers( array( 'Content-Type: text/html<x>; charset="utf 8"' ) );
+		$this->assertNull( $parsed['content_type'] );
+		$this->assertNull( $parsed['charset'] );
+	}
+
+	public function test_line_breaks_in_the_subject_become_spaces() {
+		$message = ( new MessageFactory() )->from_wp_mail( array( 'to' => 'jane@example.org', 'subject' => "Hi\r\nBcc: x@example.org" ) );
+		$this->assertSame( 'Hi  Bcc: x@example.org', $message->subject() );
+	}
+
 	public function test_recipients_accept_arrays_and_drop_invalid_entries() {
 		$list = ( new MessageFactory() )->parse_address_list( array( 'Jane <jane@example.org>', 'bad', 7, ' ok@example.org ' ) );
 
@@ -191,6 +212,18 @@ class MessageFactoryTest extends TestCase {
 			),
 			$factory->parse_attachments( array( 'Invoice.pdf' => '/tmp/x.pdf', '/tmp/y.pdf', '', 5 ) )
 		);
+	}
+
+	public function test_stream_wrapper_attachments_are_dropped() {
+		$factory = new MessageFactory();
+
+		$this->assertSame(
+			array( array( 'path' => '/var/www/uploads/a.pdf', 'name' => 'a.pdf' ) ),
+			$factory->parse_attachments( array( 'phar:///var/www/uploads/x.jpg/a', 'ftp://internal/secret', 'PHP://filter/resource=/etc/passwd', '/var/www/uploads/a.pdf' ) )
+		);
+		$this->assertTrue( MessageFactory::is_local_path( 'C:\uploads\a.pdf' ), 'Windows drive paths are local' );
+		$this->assertTrue( MessageFactory::is_local_path( '/tmp/a.pdf' ) );
+		$this->assertFalse( MessageFactory::is_local_path( 'https://example.org/a.pdf' ) );
 	}
 
 	public function test_default_from_keeps_non_www_hosts() {

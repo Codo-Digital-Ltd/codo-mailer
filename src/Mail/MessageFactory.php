@@ -107,7 +107,7 @@ final class MessageFactory {
 				'cc'           => $parsed['cc'],
 				'bcc'          => $parsed['bcc'],
 				'reply_to'     => $parsed['reply_to'],
-				'subject'      => isset( $atts['subject'] ) ? (string) $atts['subject'] : '',
+				'subject'      => isset( $atts['subject'] ) ? str_replace( array( "\r", "\n" ), ' ', (string) $atts['subject'] ) : '',
 				'body'         => isset( $atts['message'] ) ? (string) $atts['message'] : '',
 				'content_type' => '' !== $content_type ? $content_type : 'text/plain',
 				'charset'      => '' !== $charset ? $charset : 'UTF-8',
@@ -158,9 +158,10 @@ final class MessageFactory {
 
 			list( $name, $value ) = explode( ':', $header, 2 );
 			$name                 = trim( $name );
-			$value                = trim( $value );
+			$value                = trim( str_replace( array( "\r", "\n" ), '', $value ) );
 
-			if ( '' === $name || '' === $value ) {
+			// RFC 5322 field names are printable ASCII without spaces or colons.
+			if ( '' === $value || ! preg_match( '/^[!-9;-~]+$/', $name ) ) {
 				continue;
 			}
 
@@ -184,7 +185,7 @@ final class MessageFactory {
 					$this->parse_content_type( $value, $result );
 					break;
 				default:
-					$result['custom'][ $name ] = str_replace( array( "\r", "\n" ), '', $value );
+					$result['custom'][ $name ] = $value;
 			}
 		}
 
@@ -203,13 +204,16 @@ final class MessageFactory {
 		$type  = strtolower( array_shift( $parts ) );
 
 		// Multipart types are rebuilt by the transport; keep only the body type.
-		if ( 0 !== strpos( $type, 'multipart/' ) ) {
+		if ( 0 !== strpos( $type, 'multipart/' ) && preg_match( '#^[a-z0-9!\#$&^_.+-]+/[a-z0-9!\#$&^_.+-]+$#', $type ) ) {
 			$result['content_type'] = $type;
 		}
 
 		foreach ( $parts as $part ) {
 			if ( 0 === stripos( $part, 'charset=' ) ) {
-				$result['charset'] = trim( substr( $part, 8 ), "\"' " );
+				$charset = trim( substr( $part, 8 ), "\"' " );
+				if ( preg_match( '/^[A-Za-z0-9._:+-]+$/', $charset ) ) {
+					$result['charset'] = $charset;
+				}
 			}
 		}
 	}
@@ -314,12 +318,28 @@ final class MessageFactory {
 			if ( ! is_string( $path ) || '' === trim( $path ) ) {
 				continue;
 			}
-			$path     = trim( $path );
+			$path = trim( $path );
+			if ( ! self::is_local_path( $path ) ) {
+				continue;
+			}
 			$result[] = array(
 				'path' => $path,
 				'name' => is_string( $key ) && '' !== $key ? $key : basename( $path ),
 			);
 		}
 		return $result;
+	}
+
+	/**
+	 * Whether a path is a plain filesystem path rather than a stream wrapper.
+	 *
+	 * Mirrors PHPMailer's isPermittedPath(): phar:// would unserialize
+	 * metadata, and ftp:// or http:// would fetch remote files.
+	 *
+	 * @param string $path Attachment path.
+	 * @return bool
+	 */
+	public static function is_local_path( $path ) {
+		return ! preg_match( '#^[a-z][a-z\d+.-]*://#i', $path );
 	}
 }

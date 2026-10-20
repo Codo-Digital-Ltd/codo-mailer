@@ -33,7 +33,8 @@ class PhpMailerBuilderTest extends TestCase {
 		$this->assertSame( array( array( 'jane@example.org', 'Jane Doe' ) ), $mailer->getToAddresses() );
 		$this->assertSame( array( array( 'cc@example.org', 'Cee' ) ), $mailer->getCcAddresses() );
 		$this->assertSame( array( array( 'bcc@example.org', '' ) ), $mailer->getBccAddresses() );
-		$this->assertArrayHasKey( 'help@example.org', $mailer->getReplyToAddresses() );
+		// PHPMailer 6 keys Reply-To by address; 7 returns a list.
+		$this->assertSame( array( array( 'help@example.org', 'Help' ) ), array_values( $mailer->getReplyToAddresses() ) );
 		$this->assertSame( array( array( 'X-Order', '42' ) ), $mailer->getCustomHeaders() );
 		$this->assertSame( 'invoice.pdf', $mailer->getAttachments()[0][2] );
 		$this->assertSame( 'ISO-8859-1', $mailer->CharSet );

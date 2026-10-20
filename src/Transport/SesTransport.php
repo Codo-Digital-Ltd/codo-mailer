@@ -77,7 +77,7 @@ final class SesTransport extends AbstractHttpTransport {
 	 */
 	protected function deliver( Message $message ) {
 		$region = strtolower( (string) $this->config['region'] );
-		if ( ! preg_match( '/^[a-z]{2}(-[a-z]+)+-\d+$/', $region ) ) {
+		if ( ! preg_match( '/^[a-z]{2}(-[a-z]+)+-\d+\z/', $region ) ) {
 			throw new TransportException( esc_html( sprintf( 'Invalid AWS region "%s".', $region ) ) );
 		}
 

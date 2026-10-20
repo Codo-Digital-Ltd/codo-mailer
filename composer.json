@@ -9,7 +9,7 @@
     "phpunit/phpunit": "^9.6",
     "brain/monkey": "^2.6",
     "mockery/mockery": "^1.6",
-    "phpmailer/phpmailer": "^6.9",
+    "phpmailer/phpmailer": "^6.9 || ^7.1",
     "wp-coding-standards/wpcs": "^3.1",
     "phpcompatibility/phpcompatibility-wp": "^2.1",
     "dealerdirect/phpcodesniffer-composer-installer": "^1.0"

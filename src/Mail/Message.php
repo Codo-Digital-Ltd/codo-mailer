@@ -210,10 +210,11 @@ final class Message {
 	 * @return string
 	 */
 	public static function format_address( array $address ) {
-		$name = trim( str_replace( array( '"', "\r", "\n" ), '', (string) $address['name'] ) );
+		$name = trim( str_replace( array( "\r", "\n" ), '', (string) $address['name'] ) );
 		if ( '' === $name ) {
 			return $address['email'];
 		}
-		return sprintf( '"%s" <%s>', $name, $address['email'] );
+		// Escape quotes and backslashes so a name cannot close the quoted string.
+		return sprintf( '"%s" <%s>', addcslashes( $name, '"\\' ), $address['email'] );
 	}
 }

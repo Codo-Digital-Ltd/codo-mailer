@@ -64,7 +64,8 @@ class MessageTest extends TestCase {
 
 	public function test_format_address_quotes_names_and_strips_injection() {
 		$this->assertSame( 'a@example.org', Message::format_address( array( 'email' => 'a@example.org', 'name' => '' ) ) );
-		$this->assertSame( '"Jane Doe" <a@example.org>', Message::format_address( array( 'email' => 'a@example.org', 'name' => 'Jane "Doe' ) ) );
+		$this->assertSame( '"Jane \\"Doe" <a@example.org>', Message::format_address( array( 'email' => 'a@example.org', 'name' => 'Jane "Doe' ) ) );
+		$this->assertSame( '"Evil\\\\" <a@example.org>', Message::format_address( array( 'email' => 'a@example.org', 'name' => 'Evil\\' ) ), 'a trailing backslash cannot escape the closing quote' );
 		$this->assertSame( '"EvilBcc: x" <a@example.org>', Message::format_address( array( 'email' => 'a@example.org', 'name' => "Evil\r\nBcc: x" ) ) );
 	}
 
