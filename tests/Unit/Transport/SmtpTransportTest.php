@@ -77,6 +77,20 @@ class SmtpTransportTest extends TestCase {
 		$this->assertSame( 'tls', $this->mailer->SMTPSecure );
 	}
 
+	public function test_exception_from_a_phpmailer_init_callback_becomes_a_failed_result() {
+		Actions\expectDone( 'phpmailer_init' )->once()->whenHappen(
+			static function () {
+				throw new \RuntimeException( 'DKIM key missing' );
+			}
+		);
+
+		$result = $this->transport( $this->config() )->send( $this->message() );
+
+		$this->assertFalse( $result->is_success() );
+		$this->assertSame( 'SMTP error: DKIM key missing', $result->error() );
+		$this->assertSame( 0, $this->mailer->sends );
+	}
+
 	public function test_missing_host_fails_without_connecting() {
 		$result = $this->transport( $this->config( array( 'host' => '' ) ) )->send( $this->message() );
 

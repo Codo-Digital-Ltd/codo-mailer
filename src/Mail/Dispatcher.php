@@ -126,7 +126,9 @@ class Dispatcher {
 			$transport = $this->transports->create( $config );
 
 			if ( null === $transport ) {
-				if ( 'primary' === $slot ) {
+				if ( 'none' !== $config['type'] ) {
+					$errors[] = sprintf( '%s connection type "%s" is not supported.', ucfirst( $slot ), $config['type'] );
+				} elseif ( 'primary' === $slot ) {
 					$errors[] = 'No primary connection is configured.';
 				}
 				continue;
@@ -174,7 +176,7 @@ class Dispatcher {
 		$headers     = is_array( $entry['headers'] ) ? $entry['headers'] : array();
 		$attachments = array();
 		foreach ( (array) $entry['attachments'] as $attachment ) {
-			if ( is_array( $attachment ) && isset( $attachment['path'], $attachment['name'] ) && is_readable( $attachment['path'] ) ) {
+			if ( is_array( $attachment ) && isset( $attachment['path'], $attachment['name'] ) && MessageFactory::is_local_path( (string) $attachment['path'] ) && is_readable( $attachment['path'] ) ) {
 				$attachments[] = array(
 					'path' => (string) $attachment['path'],
 					'name' => (string) $attachment['name'],

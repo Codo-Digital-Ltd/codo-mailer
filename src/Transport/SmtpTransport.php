@@ -90,6 +90,9 @@ final class SmtpTransport implements TransportInterface {
 			return SendResult::success( (string) $mailer->getLastMessageID() );
 		} catch ( \PHPMailer\PHPMailer\Exception $e ) {
 			return SendResult::failure( 'SMTP error: ' . $e->getMessage() );
+		} catch ( \Throwable $e ) {
+			// A phpmailer_init callback threw; fail so the backup still runs.
+			return SendResult::failure( 'SMTP error: ' . $e->getMessage() );
 		}
 	}
 }

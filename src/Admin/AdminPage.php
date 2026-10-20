@@ -362,6 +362,9 @@ class AdminPage {
 					esc_attr( $saved ? __( 'Saved. Leave blank to keep it.', 'codo-mailer' ) : '' ),
 					disabled( $locked, true, false )
 				);
+				if ( $saved && 'smtp' === $type ) {
+					echo '<p class="description">' . esc_html__( 'Changing the host, port, encryption or username clears the saved password, so enter it again.', 'codo-mailer' ) . '</p>';
+				}
 				break;
 			case 'bool':
 				printf( '<input type="checkbox" id="%s" name="%s" value="1"%s%s>', esc_attr( $id ), esc_attr( $name ), checked( (bool) $value, true, false ), disabled( $locked, true, false ) );

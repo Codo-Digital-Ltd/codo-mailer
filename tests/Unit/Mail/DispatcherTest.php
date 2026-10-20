@@ -184,7 +184,15 @@ class DispatcherTest extends TestCase {
 		$this->alerts->shouldReceive( 'defer' )->once();
 
 		$this->assertFalse( $this->dispatcher()->send( $this->message() ) );
-		$this->assertSame( 'No primary connection is configured.', $this->logged[0]['error'] );
+		$this->assertSame( 'Primary connection type "smtp" is not supported.', $this->logged[0]['error'] );
+	}
+
+	public function test_unknown_connection_type_fails_instead_of_falling_back_to_core() {
+		$this->connections['primary'] = array( 'type' => 'carrier-pigeon' );
+		$this->alerts->shouldReceive( 'defer' )->once();
+
+		$this->assertFalse( $this->dispatcher()->filter_pre_wp_mail( null, $this->atts() ) );
+		$this->assertSame( 'Primary connection type "carrier-pigeon" is not supported.', $this->logged[0]['error'] );
 	}
 
 	public function test_invalid_wp_mail_arguments_are_logged_without_content_and_alerted() {
@@ -327,6 +335,7 @@ class DispatcherTest extends TestCase {
 					'attachments' => array(
 						array( 'path' => $file, 'name' => 'a.pdf' ),
 						array( 'path' => '/gone/b.pdf', 'name' => 'b.pdf' ),
+						array( 'path' => 'phar://' . $file . '/x', 'name' => 'c.pdf' ),
 						'junk',
 					),
 				)

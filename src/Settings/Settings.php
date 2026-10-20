@@ -71,19 +71,22 @@ class Settings {
 				'label'  => 'SMTP',
 				'fields' => array(
 					'host'       => array(
-						'label' => 'SMTP host',
-						'type'  => 'text',
+						'label'        => 'SMTP host',
+						'type'         => 'text',
+						'binds_secret' => true,
 					),
 					'port'       => array(
-						'label'   => 'Port',
-						'type'    => 'int',
-						'default' => 587,
+						'label'        => 'Port',
+						'type'         => 'int',
+						'default'      => 587,
+						'binds_secret' => true,
 					),
 					'encryption' => array(
-						'label'   => 'Encryption',
-						'type'    => 'select',
-						'default' => 'tls',
-						'options' => array(
+						'label'        => 'Encryption',
+						'type'         => 'select',
+						'default'      => 'tls',
+						'binds_secret' => true,
+						'options'      => array(
 							'tls'  => 'STARTTLS (port 587)',
 							'ssl'  => 'SSL/TLS (port 465)',
 							'none' => 'None',
@@ -95,8 +98,9 @@ class Settings {
 						'default' => true,
 					),
 					'username'   => array(
-						'label' => 'Username',
-						'type'  => 'text',
+						'label'        => 'Username',
+						'type'         => 'text',
+						'binds_secret' => true,
 					),
 					'password'   => array(
 						'label' => 'Password',
@@ -265,10 +269,18 @@ class Settings {
 
 		$type_constant = $this->constant( $slot . '_type' );
 		$type          = null !== $type_constant ? (string) $type_constant : ( isset( $config['type'] ) ? (string) $config['type'] : 'none' );
+		$type          = strtolower( trim( $type ) );
 		$types         = self::connection_types();
 
-		if ( ! isset( $types[ $type ] ) ) {
+		if ( '' === $type || 'none' === $type ) {
 			return array( 'type' => 'none' );
+		}
+
+		// An unknown type (a typo in wp-config.php, or one an extension
+		// provides) is kept, so sending fails loudly or reaches the
+		// codo_mailer_transport filter instead of falling back to PHP mail().
+		if ( ! isset( $types[ $type ] ) ) {
+			return array( 'type' => $type );
 		}
 
 		$result = array( 'type' => $type );
@@ -354,6 +366,7 @@ class Settings {
 
 		$same_type = isset( $previous['type'] ) && $previous['type'] === $type;
 		$clean     = array( 'type' => $type );
+		$kept      = array();
 
 		// The admin form nests fields under their type (primary[ses][region]);
 		// programmatic callers may pass them flat (primary[region]).
@@ -368,6 +381,7 @@ class Settings {
 				$raw = is_string( $raw ) ? trim( $raw ) : '';
 				if ( '' === $raw ) {
 					$clean[ $field ] = $same_type && isset( $previous[ $field ] ) ? (string) $previous[ $field ] : '';
+					$kept[]          = $field;
 				} else {
 					$clean[ $field ] = $this->crypto->encrypt( $raw );
 				}
@@ -383,6 +397,17 @@ class Settings {
 				$raw = isset( $meta['default'] ) ? $meta['default'] : '';
 			}
 			$clean[ $field ] = $this->cast( $meta, is_scalar( $raw ) ? sanitize_text_field( (string) $raw ) : '' );
+		}
+
+		// A kept secret is only reused for the server it was entered for, so
+		// pointing the connection somewhere else means typing it in again.
+		foreach ( $types[ $type ]['fields'] as $field => $meta ) {
+			if ( ! empty( $meta['binds_secret'] ) && ( ! isset( $previous[ $field ] ) || (string) $previous[ $field ] !== (string) $clean[ $field ] ) ) {
+				foreach ( $kept as $secret ) {
+					$clean[ $secret ] = '';
+				}
+				break;
+			}
 		}
 
 		return $clean;
