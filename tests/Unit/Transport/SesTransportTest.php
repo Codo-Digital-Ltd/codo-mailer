@@ -107,4 +107,9 @@ class SesTransportTest extends HttpTransportTestCase {
 	public function test_network_failure() {
 		$this->assertSame( 'HTTP request failed: timed out', $this->transport( $this->broken_http() )->send( $this->message() )->error() );
 	}
+
+	public function test_raw_mime_transports_check_attachment_size_too() {
+		$result = $this->transport( $this->unused_http() )->send( $this->message_with_attachments_of( array( 30 * MB_IN_BYTES ) ) );
+		$this->assertSame( 'Attachments total 30 MB, over the 25 MB limit for Amazon SES connections.', $result->error() );
+	}
 }

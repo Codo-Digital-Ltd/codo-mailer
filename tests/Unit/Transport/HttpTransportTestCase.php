@@ -107,4 +107,26 @@ abstract class HttpTransportTestCase extends TestCase {
 	protected function message_with_missing_attachment() {
 		return $this->message( array( 'attachments' => array( array( 'path' => '/nope/missing.pdf', 'name' => 'missing.pdf' ) ) ) );
 	}
+
+	/**
+	 * A message whose attachments are sparse files of the given sizes, so no
+	 * real memory or disk is used.
+	 *
+	 * @param int[] $sizes Sizes in bytes.
+	 * @return \CodoDigital\Mailer\Mail\Message
+	 */
+	protected function message_with_attachments_of( array $sizes ) {
+		$attachments = array();
+		foreach ( $sizes as $i => $size ) {
+			$path   = $this->temp_file( '', '.bin' );
+			$handle = fopen( $path, 'r+' );
+			ftruncate( $handle, $size );
+			fclose( $handle );
+			$attachments[] = array(
+				'path' => $path,
+				'name' => 'file' . $i . '.bin',
+			);
+		}
+		return $this->message( array( 'attachments' => $attachments ) );
+	}
 }

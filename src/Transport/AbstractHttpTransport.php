@@ -23,6 +23,17 @@ abstract class AbstractHttpTransport implements TransportInterface {
 	const RESERVED_HEADERS = array( 'mime-version', 'content-transfer-encoding', 'content-type', 'x-mailer' );
 
 	/**
+	 * Default cap on the total size of a message's attachments, in bytes.
+	 */
+	const ATTACHMENT_LIMIT = 25 * MB_IN_BYTES;
+
+	/**
+	 * Roughly how many bytes of memory sending needs per attachment byte:
+	 * the file, its base64 copy, and the request body built from that.
+	 */
+	const MEMORY_PER_ATTACHMENT_BYTE = 4;
+
+	/**
 	 * Connection settings.
 	 *
 	 * @var array<string, mixed>
@@ -77,12 +88,96 @@ abstract class AbstractHttpTransport implements TransportInterface {
 		}
 
 		try {
+			$this->check_attachment_size( $message );
 			return $this->deliver( $message );
 		} catch ( TransportException $e ) {
 			// Messages are HTML-escaped when thrown; results hold plain text and
 			// are escaped again wherever they are displayed.
 			return SendResult::failure( wp_specialchars_decode( $e->getMessage(), ENT_QUOTES ) );
 		}
+	}
+
+	/**
+	 * Provider limit on the total size of attachments, in bytes.
+	 *
+	 * @return int
+	 */
+	protected function attachment_limit() {
+		return self::ATTACHMENT_LIMIT;
+	}
+
+	/**
+	 * Refuse attachments too large for the provider or for PHP's memory.
+	 *
+	 * API transports read every attachment into memory and encode it, so
+	 * this runs before any file is read. Failing here lets the dispatcher
+	 * log the error and try the backup connection instead of PHP running
+	 * out of memory.
+	 *
+	 * @param Message $message Message.
+	 * @return void
+	 * @throws TransportException When the attachments are too large.
+	 */
+	protected function check_attachment_size( Message $message ) {
+		$total = 0;
+		foreach ( $message->attachments() as $attachment ) {
+			$size   = is_file( $attachment['path'] ) ? filesize( $attachment['path'] ) : false;
+			$total += false === $size ? 0 : $size;
+		}
+		if ( 0 === $total ) {
+			return;
+		}
+
+		/**
+		 * Filters the largest total attachment size an API connection will send.
+		 *
+		 * @param int    $bytes Limit in bytes: 10 MB for Postmark, 25 MB otherwise.
+		 * @param string $type  Connection type, e.g. 'postmark'.
+		 */
+		$limit = (int) apply_filters( 'codo_mailer_attachment_size_limit', $this->attachment_limit(), $this->name() );
+		if ( $limit > 0 && $total > $limit ) {
+			throw new TransportException( esc_html( sprintf( 'Attachments total %1$s, over the %2$s limit for %3$s connections.', self::megabytes( $total ), self::megabytes( $limit ), $this->label() ) ) );
+		}
+
+		$free = self::free_memory();
+		if ( null !== $free && $total * self::MEMORY_PER_ATTACHMENT_BYTE > $free ) {
+			throw new TransportException( esc_html( sprintf( 'Attachments total %1$s, too large to send through %2$s with the memory PHP has left (%3$s). Raise memory_limit or send smaller files.', self::megabytes( $total ), $this->label(), self::megabytes( $free ) ) ) );
+		}
+	}
+
+	/**
+	 * Bytes left under memory_limit, or null if there is no limit.
+	 *
+	 * @return int|null
+	 */
+	private static function free_memory() {
+		$limit = trim( (string) ini_get( 'memory_limit' ) );
+		if ( '' === $limit || '-1' === $limit ) {
+			return null;
+		}
+		$bytes = (int) $limit;
+		switch ( strtolower( substr( $limit, -1 ) ) ) {
+			case 'g':
+				$bytes *= GB_IN_BYTES;
+				break;
+			case 'm':
+				$bytes *= MB_IN_BYTES;
+				break;
+			case 'k':
+				$bytes *= KB_IN_BYTES;
+				break;
+		}
+		return $bytes > 0 ? max( 0, $bytes - memory_get_usage() ) : null;
+	}
+
+	/**
+	 * Format bytes as megabytes, or kilobytes below 1 MB.
+	 *
+	 * @param int $bytes Bytes.
+	 * @return string
+	 */
+	private static function megabytes( $bytes ) {
+		return $bytes < MB_IN_BYTES ? ceil( $bytes / KB_IN_BYTES ) . ' KB' : round( $bytes / MB_IN_BYTES, 1 ) . ' MB';
 	}
 
 	/**

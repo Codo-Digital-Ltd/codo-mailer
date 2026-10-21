@@ -79,4 +79,32 @@ class SendGridTransportTest extends HttpTransportTestCase {
 	public function test_unreadable_attachment() {
 		$this->assertFalse( $this->transport( $this->unused_http() )->send( $this->message_with_missing_attachment() )->is_success() );
 	}
+
+	public function test_attachments_over_the_default_limit_fail_cleanly() {
+		$result = $this->transport( $this->unused_http() )->send( $this->message_with_attachments_of( array( 26 * MB_IN_BYTES ) ) );
+		$this->assertSame( 'Attachments total 26 MB, over the 25 MB limit for SendGrid connections.', $result->error() );
+	}
+
+	public function test_attachments_that_would_exhaust_memory_fail_cleanly() {
+		$previous = ini_get( 'memory_limit' );
+		ini_set( 'memory_limit', (string) ( memory_get_usage() + 20 * MB_IN_BYTES ) );
+		try {
+			$result = $this->transport( $this->unused_http() )->send( $this->message_with_attachments_of( array( 8 * MB_IN_BYTES ) ) );
+		} finally {
+			ini_set( 'memory_limit', $previous );
+		}
+		$this->assertStringStartsWith( 'Attachments total 8 MB, too large to send through SendGrid with the memory PHP has left', $result->error() );
+	}
+
+	public function test_a_zero_limit_from_the_filter_disables_the_cap() {
+		\Brain\Monkey\Filters\expectApplied( 'codo_mailer_attachment_size_limit' )->andReturn( 0 );
+		$previous = ini_get( 'memory_limit' );
+		ini_set( 'memory_limit', '-1' );
+		try {
+			$result = $this->transport( $this->http( 202 ) )->send( $this->message_with_attachments_of( array( 26 * MB_IN_BYTES ) ) );
+		} finally {
+			ini_set( 'memory_limit', $previous );
+		}
+		$this->assertTrue( $result->is_success(), $result->error() );
+	}
 }
