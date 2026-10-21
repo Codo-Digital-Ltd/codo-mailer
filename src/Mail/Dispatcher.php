@@ -119,6 +119,13 @@ class Dispatcher {
 	 * @return bool Whether any connection accepted the message.
 	 */
 	public function send( Message $message, $source = 'wp_mail', $atts = null ) {
+		try {
+			$message = $this->filter_message( $message, $source );
+		} catch ( InvalidMessageException $e ) {
+			$this->fail( $message, $atts, 'The codo_mailer_message filter returned an invalid message: ' . wp_specialchars_decode( $e->getMessage(), ENT_QUOTES ), 'none', $source );
+			return false;
+		}
+
 		$errors = array();
 
 		foreach ( Settings::SLOTS as $slot ) {
@@ -165,6 +172,51 @@ class Dispatcher {
 
 		$this->fail( $message, $atts, implode( ' ', $errors ), 'none', $source );
 		return false;
+	}
+
+	/**
+	 * Let integrations change a message before any connection sends it.
+	 *
+	 * This is the supported alternative to core's phpmailer_init action,
+	 * which only runs for connections that build MIME with PHPMailer (SMTP,
+	 * Amazon SES and Mailgun). Postmark, Brevo and SendGrid send JSON, so
+	 * phpmailer_init never fires for them.
+	 *
+	 * @param Message $message Message.
+	 * @param string  $source  wp_mail|test|resend.
+	 * @return Message The filtered message, re-validated.
+	 * @throws InvalidMessageException When the filter leaves no valid recipient or From address.
+	 */
+	private function filter_message( Message $message, $source ) {
+		if ( ! has_filter( 'codo_mailer_message' ) ) {
+			return $message;
+		}
+
+		/**
+		 * Filters an outgoing email before Codo Mailer sends it, for every provider.
+		 *
+		 * Runs once per email, before the primary connection is tried; the
+		 * backup connection, the log and the wp_mail_succeeded and
+		 * wp_mail_failed actions all see the filtered message. Message is
+		 * immutable: return $message->with( array( ... ) ) with the parts to
+		 * change (see Message::defaults() for the keys). Invalid addresses,
+		 * headers and attachments are dropped as they are for wp_mail().
+		 *
+		 * @param Message $message The email.
+		 * @param string  $source  Why it is being sent: wp_mail, test or resend.
+		 */
+		$filtered = apply_filters( 'codo_mailer_message', $message, $source );
+
+		if ( ! $filtered instanceof Message ) {
+			_doing_it_wrong(
+				'codo_mailer_message',
+				esc_html__( 'The filter must return a CodoDigital\Mailer\Mail\Message object. The email was sent unchanged.', 'codo-mailer' ),
+				'1.1.0'
+			);
+			return $message;
+		}
+
+		return $this->message_factory()->normalize( $filtered );
 	}
 
 	/**
