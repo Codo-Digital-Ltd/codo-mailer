@@ -182,6 +182,7 @@ final class Plugin {
 		delete_option( Settings::OPTION );
 		delete_option( Settings::PINS_OPTION );
 		delete_transient( AlertNotifier::LOCK_TRANSIENT );
+		delete_metadata( 'user', 0, AdminPage::KEY_NOTICE_META, '', true );
 		wp_clear_scheduled_hook( self::CRON_HOOK );
 	}
 }

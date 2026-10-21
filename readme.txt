@@ -71,7 +71,7 @@ Connection field names: SMTP `host`, `port`, `encryption` (tls, ssl, none), `aut
 
 If an SMTP password is a constant but the host, port, encryption or username are not, the first successful send locks the connection to that server. Changing any of them in the admin screen then stops the connection, so the password can't be redirected to another server. To move servers, set the new values as constants too.
 
-To use your own encryption key instead of the site salts, define `CODO_MAILER_ENCRYPTION_KEY`. If you rotate your salts without one, re-enter saved API keys and passwords (secrets set as constants are unaffected).
+To use your own encryption key instead of the site salts, define `CODO_MAILER_ENCRYPTION_KEY`. See "How do I set a strong encryption key?" in the FAQ. If you rotate your salts without one, re-enter saved API keys and passwords (secrets set as constants are unaffected).
 
 = For developers =
 
@@ -131,6 +131,18 @@ Each provider call times out after 15 seconds. Failure alerts are sent at the en
 = Why does the settings screen warn about SMTP without encryption? =
 
 With Encryption set to None and Authenticate on, your SMTP username and password are sent to the server in plain text, where anyone on the network path can read them. Codo Mailer also turns off automatic STARTTLS in this mode, so this happens even if the server supports encryption. Choose TLS or SSL unless the server is a trusted relay on your own network. Connections to localhost are not warned about. Hosts can refuse plaintext logins outright with the `codo_mailer_smtp_allow_plaintext_auth` filter.
+
+= How do I set a strong encryption key? =
+
+Saved API keys and passwords are encrypted with a key derived from WordPress's `AUTH_KEY`, `AUTH_SALT`, `SECURE_AUTH_KEY` and `SECURE_AUTH_SALT`. If any of those is missing from wp-config.php, or still says "put your unique phrase here", WordPress stores it in the database, and a database backup alone is then enough to decrypt your secrets. The settings screen warns you when this is the case.
+
+To fix it, add a dedicated key of at least 32 random bytes to wp-config.php. Generate one with `php -r 'echo base64_encode( random_bytes( 32 ) ), PHP_EOL;'` (or `wp eval 'echo base64_encode( random_bytes( 32 ) );'`) and add:
+
+`define( 'CODO_MAILER_ENCRYPTION_KEY', 'paste-the-value-here' );`
+
+Use a random value, not a memorable passphrase: the key is hashed without key stretching, so a short phrase is a weak key. Keys shorter than 32 characters are warned about.
+
+Setting or changing the key makes existing saved secrets unreadable. To rotate it: set the new key, then re-enter each API key and password on the settings screen (secrets defined as constants in wp-config.php are unaffected). Keep the key out of version control and out of database backups, which is the point of keeping it in wp-config.php.
 
 == External services ==
 
