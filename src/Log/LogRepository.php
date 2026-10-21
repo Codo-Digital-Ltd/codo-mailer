@@ -179,6 +179,120 @@ class LogRepository {
 	}
 
 	/**
+	 * IDs of the entries an email address appears on, oldest first.
+	 *
+	 * Matches To, Cc, Bcc and Reply-To exactly (ignoring case). The SQL LIKE
+	 * only narrows the rows down; each candidate is then checked in PHP, so
+	 * a longer address that contains this one, or the address appearing in
+	 * a custom header, never matches.
+	 *
+	 * @param string $email Email address.
+	 * @return int[]
+	 */
+	public function ids_for_address( $email ) {
+		$email = strtolower( trim( (string) $email ) );
+		if ( '' === $email ) {
+			return array();
+		}
+
+		$like = '%' . $this->db->esc_like( (string) wp_json_encode( $email ) ) . '%';
+		$rows = $this->db->get_results(
+			$this->db->prepare( 'SELECT id, to_addresses, headers FROM %i WHERE to_addresses LIKE %s OR headers LIKE %s ORDER BY id ASC', $this->table(), $like, $like ),
+			ARRAY_A
+		);
+
+		$ids = array();
+		foreach ( is_array( $rows ) ? $rows : array() as $row ) {
+			$row['attachments'] = '[]';
+			$row['redacted']    = 0;
+			$entry              = $this->hydrate( $row );
+			if ( ! empty( self::roles_of( $entry, $email ) ) ) {
+				$ids[] = $entry['id'];
+			}
+		}
+		return $ids;
+	}
+
+	/**
+	 * How an address appears on an entry: To, Cc, Bcc and/or Reply-To.
+	 *
+	 * @param array<string, mixed> $entry Hydrated entry.
+	 * @param string               $email Email address (case-insensitive).
+	 * @return string[] Header names, e.g. array( 'To', 'Reply-To' ).
+	 */
+	public static function roles_of( array $entry, $email ) {
+		$email = strtolower( trim( (string) $email ) );
+		$roles = array();
+		foreach ( self::address_lists( $entry ) as $role => $addresses ) {
+			foreach ( $addresses as $address ) {
+				if ( is_array( $address ) && isset( $address['email'] ) && strtolower( trim( (string) $address['email'] ) ) === $email ) {
+					$roles[] = $role;
+					break;
+				}
+			}
+		}
+		return $roles;
+	}
+
+	/**
+	 * An entry's address lists, by header name.
+	 *
+	 * @param array<string, mixed> $entry Hydrated entry.
+	 * @return array<string, array<int, mixed>>
+	 */
+	public static function address_lists( array $entry ) {
+		$headers = isset( $entry['headers'] ) && is_array( $entry['headers'] ) ? $entry['headers'] : array();
+		$lists   = array( 'To' => isset( $entry['to_addresses'] ) ? $entry['to_addresses'] : array() );
+		foreach ( array(
+			'Cc'       => 'cc',
+			'Bcc'      => 'bcc',
+			'Reply-To' => 'reply_to',
+		) as $role => $key ) {
+			$lists[ $role ] = isset( $headers[ $key ] ) ? $headers[ $key ] : array();
+		}
+		return array_map(
+			static function ( $addresses ) {
+				return is_array( $addresses ) ? array_values( $addresses ) : array();
+			},
+			$lists
+		);
+	}
+
+	/**
+	 * Replace an entry's recipients and error text (used to anonymise it).
+	 *
+	 * @param int                  $id      Entry ID.
+	 * @param array<int, mixed>    $to      To addresses.
+	 * @param array<string, mixed> $headers Header data, including cc, bcc and reply_to.
+	 * @param string               $error   Error text.
+	 * @return bool Whether the row was updated.
+	 */
+	public function update_recipients( $id, array $to, array $headers, $error ) {
+		$updated = $this->db->update(
+			$this->table(),
+			array(
+				'to_addresses' => (string) wp_json_encode( array_values( $to ) ),
+				'headers'      => (string) wp_json_encode( $headers ),
+				'error'        => (string) $error,
+			),
+			array( 'id' => (int) $id ),
+			array( '%s', '%s', '%s' ),
+			array( '%d' )
+		);
+		return false !== $updated;
+	}
+
+	/**
+	 * Delete one entry.
+	 *
+	 * @param int $id Entry ID.
+	 * @return bool Whether a row was deleted.
+	 */
+	public function delete( $id ) {
+		return (bool) $this->db->delete( $this->table(), array( 'id' => (int) $id ), array( '%d' ) );
+	}
+
+	/**
 	 * Delete entries older than a number of days.
 	 *
 	 * @param int $days Retention in days.

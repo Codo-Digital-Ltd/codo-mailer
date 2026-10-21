@@ -7,6 +7,7 @@ use CodoDigital\Mailer\Alerts\AlertNotifier;
 use CodoDigital\Mailer\Log\LogRepository;
 use CodoDigital\Mailer\Mail\Dispatcher;
 use CodoDigital\Mailer\Plugin;
+use CodoDigital\Mailer\Privacy\PrivacyTools;
 use CodoDigital\Mailer\Settings\Settings;
 use CodoDigital\Mailer\Tests\TestCase;
 
@@ -31,12 +32,13 @@ class PluginTest extends TestCase {
 		parent::tearDown();
 	}
 
-	private function plugin( $settings = null, $log = null, $dispatcher = null, $admin = null ) {
+	private function plugin( $settings = null, $log = null, $dispatcher = null, $admin = null, $privacy = null ) {
 		return new Plugin(
 			$settings ? $settings : \Mockery::mock( Settings::class ),
 			$log ? $log : \Mockery::mock( LogRepository::class ),
 			$dispatcher ? $dispatcher : \Mockery::mock( Dispatcher::class ),
-			$admin ? $admin : \Mockery::mock( AdminPage::class )
+			$admin ? $admin : \Mockery::mock( AdminPage::class ),
+			$privacy ? $privacy : \Mockery::mock( PrivacyTools::class )
 		);
 	}
 
@@ -55,6 +57,8 @@ class PluginTest extends TestCase {
 		$this->assertSame( $first, $second );
 		$this->assertNotFalse( has_filter( 'pre_wp_mail' ) );
 		$this->assertNotFalse( has_action( Plugin::CRON_HOOK ) );
+		$this->assertNotFalse( has_filter( 'wp_privacy_personal_data_exporters' ), 'privacy tools outside wp-admin too' );
+		$this->assertNotFalse( has_filter( 'wp_privacy_personal_data_erasers' ) );
 		$this->assertFalse( has_action( 'admin_menu' ), 'admin hooks only in wp-admin' );
 	}
 
@@ -68,8 +72,10 @@ class PluginTest extends TestCase {
 		$dispatcher->shouldReceive( 'register' )->once();
 		$admin = \Mockery::mock( AdminPage::class );
 		$admin->shouldReceive( 'register' )->once();
+		$privacy = \Mockery::mock( PrivacyTools::class );
+		$privacy->shouldReceive( 'register' )->once();
 
-		$this->plugin( null, $log, $dispatcher, $admin )->register();
+		$this->plugin( null, $log, $dispatcher, $admin, $privacy )->register();
 	}
 
 	public function test_purge_uses_retention_setting() {

@@ -12,6 +12,7 @@ use CodoDigital\Mailer\Alerts\AlertNotifier;
 use CodoDigital\Mailer\Log\LogRepository;
 use CodoDigital\Mailer\Mail\Dispatcher;
 use CodoDigital\Mailer\Mail\Redactor;
+use CodoDigital\Mailer\Privacy\PrivacyTools;
 use CodoDigital\Mailer\Security\Crypto;
 use CodoDigital\Mailer\Settings\Settings;
 use CodoDigital\Mailer\Transport\HttpClient;
@@ -62,18 +63,27 @@ final class Plugin {
 	private $admin;
 
 	/**
+	 * Personal data exporter and eraser.
+	 *
+	 * @var PrivacyTools
+	 */
+	private $privacy;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param Settings      $settings   Settings.
 	 * @param LogRepository $log        Log storage.
 	 * @param Dispatcher    $dispatcher Dispatcher.
 	 * @param AdminPage     $admin      Admin screen.
+	 * @param PrivacyTools  $privacy    Personal data exporter and eraser.
 	 */
-	public function __construct( Settings $settings, LogRepository $log, Dispatcher $dispatcher, AdminPage $admin ) {
+	public function __construct( Settings $settings, LogRepository $log, Dispatcher $dispatcher, AdminPage $admin, PrivacyTools $privacy ) {
 		$this->settings   = $settings;
 		$this->log        = $log;
 		$this->dispatcher = $dispatcher;
 		$this->admin      = $admin;
+		$this->privacy    = $privacy;
 	}
 
 	/**
@@ -91,7 +101,7 @@ final class Plugin {
 		$dispatcher = new Dispatcher( $settings, new TransportFactory( $http ), $log, new AlertNotifier( $settings, $http, $redactor ), $redactor );
 		$admin      = new AdminPage( $settings, $dispatcher, $log );
 
-		return new self( $settings, $log, $dispatcher, $admin );
+		return new self( $settings, $log, $dispatcher, $admin, new PrivacyTools( $log, $redactor, $settings ) );
 	}
 
 	/**
@@ -124,6 +134,8 @@ final class Plugin {
 	public function register() {
 		$this->log->maybe_install();
 		$this->dispatcher->register();
+		// Not only in wp-admin: tools other than core's screens also run exporters and erasers.
+		$this->privacy->register();
 		add_action( self::CRON_HOOK, array( $this, 'purge_log' ) );
 		self::schedule_purge();
 
@@ -134,6 +146,9 @@ final class Plugin {
 
 	/**
 	 * Daily retention purge.
+	 *
+	 * Runs on WP-Cron, so on a site with DISABLE_WP_CRON and no system cron
+	 * job calling wp-cron.php, entries are kept past the retention period.
 	 *
 	 * @return int Rows deleted.
 	 */

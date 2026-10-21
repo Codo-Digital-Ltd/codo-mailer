@@ -45,6 +45,7 @@ Email logs hold password-reset links, so a leaky log is a site takeover waiting 
 * API keys and passwords are **encrypted at rest** (libsodium), so a database dump alone does not reveal them.
 * Or keep credentials out of the database entirely with **`wp-config.php` constants**.
 * Logs are deleted after 30 days by default.
+* The log works with WordPress's **personal data export and erasure** tools, and suggests text for your privacy policy.
 
 = For hosts and agencies: configuration in wp-config.php =
 
@@ -115,6 +116,19 @@ The failure is logged with each provider's error, WordPress's `wp_mail_failed` a
 = Does it send any data to Codo Digital? =
 
 No. It talks only to the email provider (and alert webhook) you configure.
+
+= Does the email log work with WordPress's privacy tools (GDPR export and erasure)? =
+
+Yes. Codo Mailer adds an exporter and an eraser to Tools > Export Personal Data and Tools > Erase Personal Data. Both find log entries where the person's address is a To, Cc, Bcc or Reply-To address (exact matches only, ignoring case).
+
+* **Export** includes the date, status, sender, subject, message and attachment names of each email, and how the person's address appeared on it. Other recipients' addresses are left out. Password-reset links, one-time codes and passwords are redacted from the export even if redaction was turned off when the email was logged.
+* **Erasure** deletes each email that was sent only to that person. An email that was also sent to other people is kept, because it is part of their record too: the person's address is removed from it, and the erasure report says how many such emails were kept. Its subject and body are not changed. If they mention the person, you can empty the whole log with "Delete all log entries" on the Email log tab.
+
+Settings > Privacy > Policy Guide includes suggested text about the email log and how long it is kept.
+
+= How long are emails kept in the log? =
+
+For the number of days set in "Keep logs for (days)", 30 by default. Old entries are deleted by a daily WP-Cron task, which WordPress runs when the site gets visits. If your site sets `DISABLE_WP_CRON`, make sure a system cron job calls `wp-cron.php` (or runs `wp cron event run --due-now`), otherwise entries are kept until it does. You can also empty the log at any time with "Delete all log entries" on the Email log tab.
 
 = Is it multisite compatible? =
 
