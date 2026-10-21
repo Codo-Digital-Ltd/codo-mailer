@@ -19,18 +19,20 @@ final class AwsSigV4 {
 	/**
 	 * Sign a request and return the headers to send.
 	 *
-	 * @param string                $method     HTTP method.
-	 * @param string                $url        Full URL.
-	 * @param array<string, string> $headers    Headers to sign (host is added).
-	 * @param string                $body       Request body.
-	 * @param string                $region     AWS region.
-	 * @param string                $service    AWS service name.
-	 * @param string                $access_key Access key ID.
-	 * @param string                $secret_key Secret access key.
-	 * @param int                   $timestamp  Unix timestamp of the request.
-	 * @return array<string, string> Headers including Authorization and X-Amz-Date.
+	 * @param string                $method        HTTP method.
+	 * @param string                $url           Full URL.
+	 * @param array<string, string> $headers       Headers to sign (host is added).
+	 * @param string                $body          Request body.
+	 * @param string                $region        AWS region.
+	 * @param string                $service       AWS service name.
+	 * @param string                $access_key    Access key ID.
+	 * @param string                $secret_key    Secret access key.
+	 * @param int                   $timestamp     Unix timestamp of the request.
+	 * @param string                $session_token Session token for temporary credentials, or ''.
+	 * @return array<string, string> Headers including Authorization and X-Amz-Date, plus
+	 *                               X-Amz-Security-Token when a session token is given.
 	 */
-	public function sign( $method, $url, array $headers, $body, $region, $service, $access_key, $secret_key, $timestamp ) {
+	public function sign( $method, $url, array $headers, $body, $region, $service, $access_key, $secret_key, $timestamp, $session_token = '' ) {
 		$parts    = wp_parse_url( $url );
 		$host     = isset( $parts['host'] ) ? $parts['host'] : '';
 		$path     = isset( $parts['path'] ) && '' !== $parts['path'] ? $parts['path'] : '/';
@@ -40,6 +42,12 @@ final class AwsSigV4 {
 
 		$headers['host']       = $host;
 		$headers['x-amz-date'] = $amz_date;
+
+		// Temporary credentials (IAM roles, STS) need their token sent and,
+		// for most services including SES, included in the signature.
+		if ( '' !== (string) $session_token ) {
+			$headers['x-amz-security-token'] = (string) $session_token;
+		}
 
 		$canonical = array();
 		foreach ( $headers as $name => $value ) {
@@ -87,17 +95,35 @@ final class AwsSigV4 {
 	}
 
 	/**
-	 * URI-encode each path segment.
+	 * Normalise the path and URI-encode each segment of it.
 	 *
-	 * @param string $path Path.
+	 * Every AWS service except S3 expects the canonical URI to be encoded
+	 * twice: once in the request line, and again here. So the path is encoded
+	 * as given, not decoded first, and a "%20" in the URL is signed as "%2520".
+	 * Empty and "." segments are dropped and ".." removes the previous one, as
+	 * in RFC 3986; a trailing slash is kept.
+	 *
+	 * @param string $path Path, as it appears in the URL.
 	 * @return string
 	 */
 	private function canonical_path( $path ) {
-		$segments = explode( '/', $path );
-		foreach ( $segments as $i => $segment ) {
-			$segments[ $i ] = rawurlencode( rawurldecode( $segment ) );
+		$segments = array();
+		foreach ( explode( '/', $path ) as $segment ) {
+			if ( '' === $segment || '.' === $segment ) {
+				continue;
+			}
+			if ( '..' === $segment ) {
+				array_pop( $segments );
+				continue;
+			}
+			$segments[] = rawurlencode( $segment );
 		}
-		return implode( '/', $segments );
+
+		$canonical = '/' . implode( '/', $segments );
+		if ( '/' !== $canonical && '/' === substr( $path, -1 ) ) {
+			$canonical .= '/';
+		}
+		return $canonical;
 	}
 
 	/**

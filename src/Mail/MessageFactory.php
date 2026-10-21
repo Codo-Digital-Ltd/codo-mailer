@@ -118,6 +118,84 @@ final class MessageFactory {
 	}
 
 	/**
+	 * Re-check a message built outside this factory, e.g. by a filter.
+	 *
+	 * Applies the same rules as from_wp_mail(): invalid addresses, header
+	 * names, content types, charsets and stream-wrapper attachments are
+	 * dropped, and line breaks are removed from names, header values and the
+	 * subject, so a filter cannot inject headers.
+	 *
+	 * @param Message $message Message.
+	 * @return Message
+	 * @throws InvalidMessageException When it has no valid recipient or From address.
+	 */
+	public function normalize( Message $message ) {
+		$lines = array();
+		foreach ( $message->headers() as $name => $value ) {
+			$lines[] = $name . ':' . ( is_scalar( $value ) ? (string) $value : '' );
+		}
+		$parsed = $this->parse_headers( $lines );
+		$type   = $this->parse_headers( array( 'Content-Type: ' . str_replace( array( "\r", "\n" ), '', $message->content_type() . '; charset=' . $message->charset() ) ) );
+
+		$parts = array(
+			'from_email'   => trim( $message->from_email() ),
+			'from_name'    => trim( str_replace( array( "\r", "\n" ), '', $message->from_name() ) ),
+			'to'           => $this->normalize_addresses( $message->to() ),
+			'cc'           => $this->normalize_addresses( $message->cc() ),
+			'bcc'          => $this->normalize_addresses( $message->bcc() ),
+			'reply_to'     => $this->normalize_addresses( $message->reply_to() ),
+			'subject'      => str_replace( array( "\r", "\n" ), ' ', $message->subject() ),
+			'body'         => $message->body(),
+			'content_type' => null !== $type['content_type'] ? $type['content_type'] : 'text/plain',
+			'charset'      => null !== $type['charset'] ? $type['charset'] : 'UTF-8',
+			'headers'      => $parsed['custom'],
+			'attachments'  => array(),
+		);
+
+		foreach ( $message->attachments() as $attachment ) {
+			$path = is_array( $attachment ) && isset( $attachment['path'] ) && is_string( $attachment['path'] ) ? trim( $attachment['path'] ) : '';
+			if ( '' === $path || ! self::is_local_path( $path ) ) {
+				continue;
+			}
+			$name                   = isset( $attachment['name'] ) && is_string( $attachment['name'] ) ? trim( str_replace( array( "\r", "\n" ), '', $attachment['name'] ) ) : '';
+			$parts['attachments'][] = array(
+				'path' => $path,
+				'name' => '' !== $name ? $name : basename( $path ),
+			);
+		}
+
+		if ( empty( $parts['to'] ) && empty( $parts['cc'] ) && empty( $parts['bcc'] ) ) {
+			throw new InvalidMessageException( 'No valid recipient address.' );
+		}
+		if ( ! is_email( $parts['from_email'] ) ) {
+			throw new InvalidMessageException( esc_html( sprintf( 'Invalid From address "%s".', $parts['from_email'] ) ) );
+		}
+
+		return new Message( $parts );
+	}
+
+	/**
+	 * Validate a list of address arrays, dropping invalid entries.
+	 *
+	 * @param mixed $addresses List of array( 'email' => string, 'name' => string ).
+	 * @return array<int, array{email: string, name: string}>
+	 */
+	private function normalize_addresses( $addresses ) {
+		$result = array();
+		foreach ( is_array( $addresses ) ? $addresses : array() as $address ) {
+			$email = is_array( $address ) && isset( $address['email'] ) && is_string( $address['email'] ) ? trim( $address['email'] ) : '';
+			if ( '' === $email || ! is_email( $email ) ) {
+				continue;
+			}
+			$result[] = array(
+				'email' => $email,
+				'name'  => isset( $address['name'] ) && is_scalar( $address['name'] ) ? trim( str_replace( array( "\r", "\n" ), '', (string) $address['name'] ) ) : '',
+			);
+		}
+		return $result;
+	}
+
+	/**
 	 * WordPress's default From address: wordpress@<site domain>.
 	 *
 	 * @return string

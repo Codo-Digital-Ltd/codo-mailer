@@ -328,11 +328,49 @@ class AdminPageTest extends TestCase {
 		return array(
 			'smtp'     => array( 'smtp', array( 'host' => 'smtp.example.com', 'port' => 465, 'encryption' => 'ssl', 'username' => 'u', 'password' => 'p' ) ),
 			'ses'      => array( 'ses', array( 'region' => 'eu-west-2', 'access_key' => 'AKIA1', 'secret_key' => 's3' ) ),
+			'ses-temp' => array( 'ses', array( 'region' => 'eu-west-2', 'access_key' => 'ASIA1', 'secret_key' => 's3', 'session_token' => 'tok' ) ),
 			'postmark' => array( 'postmark', array( 'server_token' => 'pm', 'message_stream' => 'broadcast' ) ),
 			'mailgun'  => array( 'mailgun', array( 'domain' => 'mg.example.com', 'api_key' => 'key-1', 'region' => 'us' ) ),
 			'brevo'    => array( 'brevo', array( 'api_key' => 'xkeysib' ) ),
 			'sendgrid' => array( 'sendgrid', array( 'api_key' => 'SG.1' ) ),
 		);
+	}
+
+	public function test_saved_session_token_can_be_removed_from_the_form() {
+		$this->submit_provider( 'ses', array( 'region' => 'eu-west-2', 'access_key' => 'ASIA1', 'secret_key' => 's3', 'session_token' => 'tok' ) );
+
+		$html = $this->render();
+		$this->assertStringContainsString( '<input type="checkbox" name="codo_mailer[primary][ses][session_token_clear]" value="1"> Remove', $html );
+		$this->assertStringNotContainsString( 'secret_key_clear', $html, 'only the session token is removable' );
+		$this->assertStringContainsString( 'Only for temporary credentials', $html );
+
+		$kept = $this->submit_provider( 'ses', array() );
+		$this->assertSame( 'tok', $kept['session_token'], 'left blank, it is kept' );
+
+		$fields = $this->browser_fields( $this->render() );
+		$query  = array();
+		foreach ( $fields as $pair ) {
+			$query[] = rawurlencode( $pair[0] ) . '=' . rawurlencode( $pair[1] );
+		}
+		$query[] = rawurlencode( 'codo_mailer[primary][ses][session_token_clear]' ) . '=1';
+		parse_str( implode( '&', $query ), $post );
+		$this->settings->save( $post['codo_mailer'] );
+
+		$connection = $this->settings->connection( 'primary' );
+		$this->assertSame( '', $connection['session_token'] );
+		$this->assertSame( 's3', $connection['secret_key'] );
+	}
+
+	public function test_no_remove_box_for_a_session_token_set_in_wp_config() {
+		$this->constants = array(
+			'CODO_MAILER_PRIMARY_TYPE'          => 'ses',
+			'CODO_MAILER_PRIMARY_SESSION_TOKEN' => 'const-token',
+		);
+
+		$html = $this->render();
+
+		$this->assertStringNotContainsString( 'session_token_clear', $html );
+		$this->assertStringNotContainsString( 'const-token', $html );
 	}
 
 	public function test_resaving_the_form_keeps_secrets() {
@@ -343,11 +381,11 @@ class AdminPageTest extends TestCase {
 
 	public function test_webhook_url_is_never_printed_back() {
 		$crypto       = new Crypto( 'k' );
-		$this->option = array( 'alert_webhook' => $crypto->encrypt( 'https://hooks.slack.com/services/T/B/SECRET' ) );
+		$this->option = array( 'alert_webhook' => $crypto->encrypt( 'https://hooks.slack.com/services/T/B/WEBHOOK-SECRET' ) );
 
 		$html = $this->render();
 
-		$this->assertStringNotContainsString( 'SECRET', $html );
+		$this->assertStringNotContainsString( 'WEBHOOK-SECRET', $html );
 		$this->assertStringContainsString( 'name="codo_mailer[alert_webhook]" class="regular-text" autocomplete="off" placeholder="Saved. Leave blank to keep it."', $html );
 		$this->assertStringContainsString( 'name="codo_mailer[alert_webhook_clear]"', $html );
 	}
@@ -784,5 +822,31 @@ class AdminPageTest extends TestCase {
 
 		$this->page()->handle_clear_log();
 		$this->assertSame( 'Deleted 4 log entries.', $this->notice()['message'] );
+	}
+
+	public function test_json_api_providers_explain_that_phpmailer_init_does_not_run() {
+		$html = $this->render();
+
+		foreach ( array( 'Postmark', 'Brevo', 'SendGrid' ) as $label ) {
+			$this->assertStringContainsString( '<p class="description">' . $label . ' sends email through its API without PHPMailer, so plugins that use the phpmailer_init hook', $html );
+		}
+		foreach ( array( 'SMTP', 'Amazon SES', 'Mailgun' ) as $label ) {
+			$this->assertStringNotContainsString( $label . ' sends email through its API', $html );
+		}
+		$this->assertStringContainsString( 'codo_mailer_message filter', $html );
+		$this->assertStringNotContainsString( 'Another plugin on this site', $html );
+
+		// The note sits inside each provider's own table, so the type switcher shows it with that provider.
+		$this->assertMatchesRegularExpression( '#data-codo-slot="primary" data-codo-type="brevo">(?:(?!</table>).)*Brevo sends email through its API#s', $html );
+	}
+
+	public function test_json_api_providers_warn_when_a_plugin_hooks_phpmailer_init() {
+		add_action( 'phpmailer_init', 'dkim_sign' );
+
+		$html = $this->render();
+
+		$this->assertStringContainsString( '<div class="notice notice-warning inline"><p>Another plugin on this site changes outgoing email with the phpmailer_init hook', $html );
+		$this->assertStringContainsString( 'Postmark sends email through its API without PHPMailer, so those changes will not be applied.', $html );
+		$this->assertSame( 6, substr_count( $html, 'Another plugin on this site' ), 'three providers, two connections' );
 	}
 }

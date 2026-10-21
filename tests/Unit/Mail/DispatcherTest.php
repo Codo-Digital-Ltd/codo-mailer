@@ -3,6 +3,7 @@ namespace CodoDigital\Mailer\Tests\Unit\Mail;
 
 use Brain\Monkey\Actions;
 use Brain\Monkey\Filters;
+use Brain\Monkey\Functions;
 use CodoDigital\Mailer\Alerts\AlertNotifier;
 use CodoDigital\Mailer\Log\LogRepository;
 use CodoDigital\Mailer\Mail\Dispatcher;
@@ -454,5 +455,142 @@ class DispatcherTest extends TestCase {
 		$this->transport( 'smtp', SendResult::failure( 'still down' ) );
 		$this->alerts->shouldReceive( 'defer' )->once();
 		$this->assertSame( 'Resending failed. The new attempt has been logged.', $this->dispatcher()->resend( $this->entry() ) );
+	}
+
+	/**
+	 * Register a codo_mailer_message callback (Brain Monkey does not run
+	 * callbacks, so the filter's result comes from $callback).
+	 *
+	 * @param callable $callback fn( Message $message, string $source ): mixed.
+	 * @return void
+	 */
+	private function message_filter( $callback ) {
+		add_filter( 'codo_mailer_message', $callback, 10, 2 );
+		Filters\expectApplied( 'codo_mailer_message' )->andReturnUsing( $callback );
+	}
+
+	public function test_message_filter_changes_the_email_for_every_transport() {
+		$this->connections['primary'] = array( 'type' => 'postmark' );
+		$sources                      = array();
+		$this->message_filter(
+			static function ( $message, $source ) use ( &$sources ) {
+				$sources[] = $source;
+				return $message->with(
+					array(
+						'bcc'     => array( array( 'email' => 'archive@example.com', 'name' => '' ) ),
+						'headers' => $message->headers() + array( 'X-Archive' => 'yes' ),
+					)
+				);
+			}
+		);
+		$transport = $this->transport( 'postmark', SendResult::success(), 0 );
+		$transport->shouldReceive( 'send' )->once()->with(
+			\Mockery::on(
+				static function ( $message ) {
+					return 'archive@example.com' === $message->bcc()[0]['email']
+						&& array( 'X-Order' => '1', 'X-Archive' => 'yes' ) === $message->headers()
+						&& 'Thanks' === $message->body();
+				}
+			)
+		)->andReturn( SendResult::success() );
+		Actions\expectDone( 'codo_mailer_sent' )->once()->with( \Mockery::on( static function ( $message ) {
+			return 'archive@example.com' === $message->bcc()[0]['email'];
+		} ), 'primary:postmark', \Mockery::any() );
+
+		$this->assertTrue( $this->dispatcher()->filter_pre_wp_mail( null, $this->atts() ) );
+
+		$this->assertSame( array( 'wp_mail' ), $sources, 'runs once per email' );
+		$this->assertSame( 'archive@example.com', $this->logged[0]['headers']['bcc'][0]['email'], 'the log records what was sent' );
+	}
+
+	public function test_message_filter_runs_once_even_when_the_backup_is_used() {
+		$this->connections['backup'] = array( 'type' => 'sendgrid' );
+		$calls                       = 0;
+		$this->message_filter(
+			static function ( $message ) use ( &$calls ) {
+				++$calls;
+				return $message->with( array( 'subject' => 'Filtered' ) );
+			}
+		);
+		$this->transport( 'smtp', SendResult::failure( 'down' ) );
+		$backup = $this->transport( 'sendgrid', SendResult::success(), 0 );
+		$backup->shouldReceive( 'send' )->once()->with(
+			\Mockery::on(
+				static function ( $message ) {
+					return 'Filtered' === $message->subject();
+				}
+			)
+		)->andReturn( SendResult::success() );
+
+		$this->assertTrue( $this->dispatcher()->send( $this->message(), 'test' ) );
+		$this->assertSame( 1, $calls );
+	}
+
+	public function test_message_filter_output_is_validated() {
+		$this->message_filter(
+			static function ( $message ) {
+				return $message->with( array( 'headers' => array( 'X-Evil' => "x\r\nBcc: evil@example.net" ) ) );
+			}
+		);
+		$transport = $this->transport( 'smtp', SendResult::success(), 0 );
+		$transport->shouldReceive( 'send' )->once()->with(
+			\Mockery::on(
+				static function ( $message ) {
+					return array( 'X-Evil' => 'xBcc: evil@example.net' ) === $message->headers();
+				}
+			)
+		)->andReturn( SendResult::success() );
+
+		$this->assertTrue( $this->dispatcher()->send( $this->message() ) );
+	}
+
+	public function test_message_filter_that_returns_something_else_is_ignored() {
+		$this->message_filter(
+			static function () {
+				return null;
+			}
+		);
+		Functions\expect( '_doing_it_wrong' )->once()->with( 'codo_mailer_message', \Mockery::type( 'string' ), '1.1.0' );
+		$transport = $this->transport( 'smtp', SendResult::success(), 0 );
+		$transport->shouldReceive( 'send' )->once()->with(
+			\Mockery::on(
+				static function ( $message ) {
+					return 'Hello' === $message->subject();
+				}
+			)
+		)->andReturn( SendResult::success() );
+
+		$this->assertTrue( $this->dispatcher()->send( $this->message() ) );
+	}
+
+	public function test_message_filter_that_removes_every_recipient_fails_the_email() {
+		$this->message_filter(
+			static function ( $message ) {
+				return $message->with( array( 'to' => array() ) );
+			}
+		);
+		$this->transport( 'smtp', SendResult::success(), 0 );
+		Actions\expectDone( 'wp_mail_failed' )->once();
+		$this->alerts->shouldReceive( 'defer' )->once();
+
+		$this->assertFalse( $this->dispatcher()->send( $this->message(), 'resend' ) );
+
+		$this->assertSame( 'failed', $this->logged[0]['status'] );
+		$this->assertSame( 'resend', $this->logged[0]['source'] );
+		$this->assertSame( 'The codo_mailer_message filter returned an invalid message: No valid recipient address.', $this->logged[0]['error'] );
+		$this->assertSame( 'jane@example.org', $this->logged[0]['to'][0]['email'], 'the original email is logged' );
+	}
+
+	public function test_message_filter_error_text_is_logged_unescaped() {
+		$this->message_filter(
+			static function ( $message ) {
+				return $message->with( array( 'from_email' => 'bad' ) );
+			}
+		);
+		$this->transport( 'smtp', SendResult::success(), 0 );
+		$this->alerts->shouldReceive( 'defer' )->once();
+
+		$this->assertFalse( $this->dispatcher()->send( $this->message() ) );
+		$this->assertSame( 'The codo_mailer_message filter returned an invalid message: Invalid From address "bad".', $this->logged[0]['error'] );
 	}
 }

@@ -13,6 +13,7 @@ use CodoDigital\Mailer\Mail\InvalidMessageException;
 use CodoDigital\Mailer\Security\Crypto;
 use CodoDigital\Mailer\Settings\Settings;
 use CodoDigital\Mailer\Transport\SmtpTransport;
+use CodoDigital\Mailer\Transport\TransportFactory;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -414,8 +415,40 @@ class AdminPage {
 			foreach ( $meta['fields'] as $field => $field_meta ) {
 				$this->connection_field( $slot, $type, $field, $field_meta, $values );
 			}
+			if ( in_array( $type, TransportFactory::WITHOUT_PHPMAILER, true ) ) {
+				$this->phpmailer_init_notice( $meta['label'] );
+			}
 			echo '</table>';
 		}
+	}
+
+	/**
+	 * Explain that phpmailer_init does not run for a JSON API provider.
+	 *
+	 * Shown in that provider's fields, so it appears as soon as the provider
+	 * is picked. It is a warning when another plugin hooks phpmailer_init,
+	 * since that plugin's changes will then be silently skipped.
+	 *
+	 * @param string $label Provider name.
+	 * @return void
+	 */
+	private function phpmailer_init_notice( $label ) {
+		if ( has_action( 'phpmailer_init' ) ) {
+			$text = sprintf(
+				/* translators: %s: provider name, e.g. Postmark. */
+				__( 'Another plugin on this site changes outgoing email with the phpmailer_init hook (for example to add a DKIM signature, Bcc archive copies, embedded images or extra headers). %s sends email through its API without PHPMailer, so those changes will not be applied. Choose SMTP, Amazon SES or Mailgun to keep them, or ask that plugin\'s developer to support the codo_mailer_message filter.', 'codo-mailer' ),
+				$label
+			);
+			echo '<tr><td colspan="2"><div class="notice notice-warning inline"><p>' . esc_html( $text ) . '</p></div></td></tr>';
+			return;
+		}
+
+		$text = sprintf(
+			/* translators: %s: provider name, e.g. Postmark. */
+			__( '%s sends email through its API without PHPMailer, so plugins that use the phpmailer_init hook (DKIM signing, Bcc archive copies, embedded images, extra headers) have no effect with it. Developers can use the codo_mailer_message filter instead.', 'codo-mailer' ),
+			$label
+		);
+		echo '<tr><td colspan="2"><p class="description">' . esc_html( $text ) . '</p></td></tr>';
 	}
 
 	/**
@@ -448,8 +481,18 @@ class AdminPage {
 					esc_attr( $saved ? __( 'Saved. Leave blank to keep it.', 'codo-mailer' ) : '' ),
 					disabled( $locked, true, false )
 				);
+				if ( $saved && ! $locked && ! empty( $meta['clearable'] ) ) {
+					printf(
+						' <label><input type="checkbox" name="%s" value="1"> %s</label>',
+						esc_attr( 'codo_mailer[' . $slot . '][' . $type . '][' . $field . '_clear]' ),
+						esc_html__( 'Remove', 'codo-mailer' )
+					);
+				}
 				if ( $saved && 'smtp' === $type ) {
 					echo '<p class="description">' . esc_html__( 'Changing the host, port, encryption or username clears the saved password, so enter it again.', 'codo-mailer' ) . '</p>';
+				}
+				if ( 'ses' === $type && 'session_token' === $field ) {
+					echo '<p class="description">' . esc_html__( 'Optional. Only for temporary credentials (an IAM role or AWS STS); leave blank for a normal access key. Temporary credentials expire, so set them in wp-config.php from your host\'s environment, or leave the access key ID blank here to use the AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and AWS_SESSION_TOKEN environment variables.', 'codo-mailer' ) . '</p>';
 				}
 				break;
 			case 'bool':
