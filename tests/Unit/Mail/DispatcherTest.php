@@ -267,6 +267,14 @@ class DispatcherTest extends TestCase {
 		$this->assertStringNotContainsString( 'SECRET', $this->logged[0]['body'] );
 	}
 
+	public function test_secrets_in_the_subject_are_redacted_in_the_log() {
+		$this->transport( 'smtp', SendResult::success() );
+		$this->dispatcher()->filter_pre_wp_mail( null, $this->atts( array( 'subject' => '482913 is your login code' ) ) );
+
+		$this->assertTrue( $this->logged[0]['redacted'], 'a redacted subject also blocks resend' );
+		$this->assertSame( Redactor::PLACEHOLDER . ' is your login code', $this->logged[0]['subject'] );
+	}
+
 	public function test_redaction_can_be_turned_off() {
 		$this->config['redact_sensitive'] = false;
 		$this->transport( 'smtp', SendResult::success() );
