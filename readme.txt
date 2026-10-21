@@ -4,7 +4,7 @@ Tags: smtp, email, amazon ses, email log, deliverability
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.2
+Stable tag: 1.1.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -238,6 +238,13 @@ If you enter a webhook URL (for example a Slack incoming webhook), Codo Mailer p
 
 == Changelog ==
 
+= 1.1.0 =
+* New: personal data export and erasure for the email log, under Tools > Export Personal Data and Tools > Erase Personal Data. Exports leave out other recipients and redact secrets. Erasure deletes emails sent only to that person and removes their address from emails that were also sent to others. Suggested privacy policy text is added to the Policy Guide.
+* New: Amazon SES supports temporary AWS credentials (IAM roles, STS). Set a session token on the settings screen or with `CODO_MAILER_PRIMARY_SESSION_TOKEN`, or leave the access key ID blank to use the `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `AWS_SESSION_TOKEN` environment variables.
+* New: `codo_mailer_message` filter to change an email before it is sent, for every provider.
+* Docs: the settings screen and FAQ explain that `phpmailer_init` does not run for Postmark, Brevo and SendGrid, and warn when a plugin on the site relies on it. The FAQ also explains that log retention depends on WP-Cron.
+* Improvement: Amazon SES request signing now encodes and normalises the request path as AWS specifies for services other than S3, checked against the AWS Signature Version 4 test suite. Today's SES requests are signed the same as before.
+
 = 1.0.2 =
 * Security: Resend no longer attaches a file that has changed since the email was sent, or is missing. The log says which attachments were left out.
 * Security: redaction now also catches one-time codes and PINs, passwords written without a colon, and more login-link parameters, and it covers the subject line in the log and in failure alerts.
@@ -259,6 +266,9 @@ If you enter a webhook URL (for example a Slack incoming webhook), Codo Mailer p
 * First release: SMTP, Amazon SES, Postmark, Mailgun, Brevo and SendGrid; backup connection; email log with redaction and resend; email and webhook alerts; wp-config.php constants; encrypted secrets.
 
 == Upgrade Notice ==
+
+= 1.1.0 =
+Personal data export and erasure for the email log, temporary AWS credentials for Amazon SES, and a new codo_mailer_message filter.
 
 = 1.0.2 =
 Safer resend, wider redaction of codes and passwords, and warnings for weak encryption keys and unencrypted SMTP logins. Recommended for all sites.
