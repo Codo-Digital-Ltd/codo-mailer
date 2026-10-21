@@ -4,7 +4,7 @@ Tags: smtp, email, amazon ses, email log, deliverability
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.1
+Stable tag: 1.0.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -203,6 +203,14 @@ If you enter a webhook URL (for example a Slack incoming webhook), Codo Mailer p
 
 == Changelog ==
 
+= 1.0.2 =
+* Security: Resend no longer attaches a file that has changed since the email was sent, or is missing. The log says which attachments were left out.
+* Security: redaction now also catches one-time codes and PINs, passwords written without a colon, and more login-link parameters, and it covers the subject line in the log and in failure alerts.
+* Security: when access is opened to other roles with the `codo_mailer_capability` filter, only administrators can read logged message bodies or turn redaction off.
+* Security: the settings screen warns when the encryption key could be recovered from the database, or is too short. The FAQ explains how to set a strong key.
+* Security: the settings screen warns when SMTP sends its password without encryption. Hosts can refuse this with the new `codo_mailer_smtp_allow_plaintext_auth` filter.
+* Fix: attachments too large for an API connection (10 MB for Postmark, 25 MB for the others, or more than PHP's memory allows) now fail cleanly and go to the backup connection instead of stopping PHP. The limit can be changed with the new `codo_mailer_attachment_size_limit` filter.
+
 = 1.0.1 =
 * Security: a password set in wp-config.php is now locked to the SMTP server it last sent through. Changing that server's host, port, encryption or username in the admin screen stops the connection until they are set in wp-config.php too.
 * Security: the alert webhook URL is now stored encrypted and never shown again after saving. Existing URLs are encrypted automatically.
@@ -216,6 +224,9 @@ If you enter a webhook URL (for example a Slack incoming webhook), Codo Mailer p
 * First release: SMTP, Amazon SES, Postmark, Mailgun, Brevo and SendGrid; backup connection; email log with redaction and resend; email and webhook alerts; wp-config.php constants; encrypted secrets.
 
 == Upgrade Notice ==
+
+= 1.0.2 =
+Safer resend, wider redaction of codes and passwords, and warnings for weak encryption keys and unencrypted SMTP logins. Recommended for all sites.
 
 = 1.0.1 =
 Security hardening for stored credentials and message headers. Recommended for all sites.
