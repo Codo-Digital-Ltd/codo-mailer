@@ -247,7 +247,7 @@ class AdminPage {
 			return;
 		}
 		delete_transient( $key );
-		$type = isset( $notice['type'] ) && 'error' === $notice['type'] ? 'error' : 'success';
+		$type = isset( $notice['type'] ) && in_array( $notice['type'], array( 'error', 'warning' ), true ) ? $notice['type'] : 'success';
 		printf(
 			'<div class="notice notice-%s is-dismissible"><p>%s</p></div>',
 			esc_attr( $type ),
@@ -731,7 +731,25 @@ class AdminPage {
 			return;
 		}
 
-		$result = $this->dispatcher->resend( $entry );
+		$skipped = $this->dispatcher->resend_attachments( $entry )['skip'];
+		$result  = $this->dispatcher->resend( $entry );
+		if ( true === $result && array() !== $skipped ) {
+			$this->redirect(
+				'log',
+				'warning',
+				sprintf(
+					/* translators: %s: comma-separated attachment file names. */
+					_n(
+						'Email resent without this attachment, because it is missing or has changed since the email was first sent: %s',
+						'Email resent without these attachments, because they are missing or have changed since the email was first sent: %s',
+						count( $skipped ),
+						'codo-mailer'
+					),
+					implode( ', ', $skipped )
+				)
+			);
+			return;
+		}
 		if ( true === $result ) {
 			$this->redirect( 'log', 'success', __( 'Email resent.', 'codo-mailer' ) );
 			return;

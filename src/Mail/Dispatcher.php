@@ -179,21 +179,13 @@ class Dispatcher {
 		}
 
 		$headers     = is_array( $entry['headers'] ) ? $entry['headers'] : array();
-		$attachments = array();
-		foreach ( (array) $entry['attachments'] as $attachment ) {
-			if ( is_array( $attachment ) && isset( $attachment['path'], $attachment['name'] ) && MessageFactory::is_local_path( (string) $attachment['path'] ) && is_readable( $attachment['path'] ) ) {
-				$attachments[] = array(
-					'path' => (string) $attachment['path'],
-					'name' => (string) $attachment['name'],
-				);
-			}
-		}
+		$attachments = $this->resend_attachments( $entry );
 
 		$parts                = array_intersect_key( $headers, Message::defaults() );
 		$parts['to']          = (array) $entry['to_addresses'];
 		$parts['subject']     = (string) $entry['subject'];
 		$parts['body']        = (string) $entry['body'];
-		$parts['attachments'] = $attachments;
+		$parts['attachments'] = $attachments['keep'];
 		$message              = new Message( $parts );
 
 		if ( empty( $message->all_recipient_emails() ) || '' === $message->from_email() ) {
@@ -201,6 +193,46 @@ class Dispatcher {
 		}
 
 		return $this->send( $message, 'resend' ) ? true : __( 'Resending failed. The new attempt has been logged.', 'codo-mailer' );
+	}
+
+	/**
+	 * Split a log entry's attachments into those safe to re-attach and those to skip.
+	 *
+	 * The log stores paths, not file contents. A file is only re-attached if it
+	 * still exists, is a plain local path, and has not been modified since the
+	 * entry was logged; otherwise whatever now sits at that path could be sent.
+	 *
+	 * @param array<string, mixed> $entry Hydrated log entry.
+	 * @return array{keep: array<int, array{path: string, name: string}>, skip: array<int, string>} Kept attachments, and the names of skipped ones.
+	 */
+	public function resend_attachments( array $entry ) {
+		$logged_at = isset( $entry['created_at'] ) ? strtotime( (string) $entry['created_at'] . ' UTC' ) : false;
+		$result    = array(
+			'keep' => array(),
+			'skip' => array(),
+		);
+
+		foreach ( (array) ( isset( $entry['attachments'] ) ? $entry['attachments'] : array() ) as $attachment ) {
+			if ( ! is_array( $attachment ) || ! isset( $attachment['path'], $attachment['name'] ) ) {
+				continue;
+			}
+			$path = (string) $attachment['path'];
+			$name = (string) $attachment['name'];
+
+			clearstatcache( true, $path );
+			$modified = MessageFactory::is_local_path( $path ) && is_file( $path ) && is_readable( $path ) ? filemtime( $path ) : false;
+			if ( false === $logged_at || false === $modified || $modified > $logged_at ) {
+				$result['skip'][] = '' !== $name ? $name : basename( $path );
+				continue;
+			}
+
+			$result['keep'][] = array(
+				'path' => $path,
+				'name' => $name,
+			);
+		}
+
+		return $result;
 	}
 
 	/**
