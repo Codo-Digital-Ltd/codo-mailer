@@ -67,4 +67,26 @@ class CryptoTest extends TestCase {
 		$b = new Crypto( 'dedicated' );
 		$this->assertSame( 'x', $b->decrypt( $a->encrypt( 'x' ) ) );
 	}
+
+	public function test_key_problem() {
+		$salts = array(
+			'AUTH_KEY'         => 'a-long-random-salt-value',
+			'AUTH_SALT'        => 'b-long-random-salt-value',
+			'SECURE_AUTH_KEY'  => 'c-long-random-salt-value',
+			'SECURE_AUTH_SALT' => 'd-long-random-salt-value',
+		);
+		$reader = static function ( array $constants ) {
+			return static function ( $name ) use ( $constants ) {
+				return isset( $constants[ $name ] ) ? $constants[ $name ] : null;
+			};
+		};
+
+		$this->assertNull( Crypto::key_problem( $reader( $salts ) ) );
+		$this->assertNull( Crypto::key_problem( $reader( array( 'CODO_MAILER_ENCRYPTION_KEY' => base64_encode( random_bytes( 32 ) ) ) ) ) );
+		$this->assertSame( 'short_key', Crypto::key_problem( $reader( $salts + array( 'CODO_MAILER_ENCRYPTION_KEY' => 'too-short' ) ) ) );
+		$this->assertSame( 'database_salts', Crypto::key_problem( $reader( array() ) ) );
+		$this->assertSame( 'database_salts', Crypto::key_problem( $reader( array( 'CODO_MAILER_ENCRYPTION_KEY' => '' ) + array_slice( $salts, 0, 3 ) ) ), 'empty key, one salt missing' );
+		$this->assertSame( 'database_salts', Crypto::key_problem( $reader( array_merge( $salts, array( 'AUTH_SALT' => 'put your unique phrase here' ) ) ) ) );
+		$this->assertSame( 'database_salts', Crypto::key_problem( $reader( array_merge( $salts, array( 'SECURE_AUTH_KEY' => '' ) ) ) ) );
+	}
 }

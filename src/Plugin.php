@@ -87,7 +87,8 @@ final class Plugin {
 		$settings   = new Settings( new Crypto() );
 		$http       = new HttpClient();
 		$log        = new LogRepository( $wpdb );
-		$dispatcher = new Dispatcher( $settings, new TransportFactory( $http ), $log, new AlertNotifier( $settings, $http ), new Redactor() );
+		$redactor   = new Redactor();
+		$dispatcher = new Dispatcher( $settings, new TransportFactory( $http ), $log, new AlertNotifier( $settings, $http, $redactor ), $redactor );
 		$admin      = new AdminPage( $settings, $dispatcher, $log );
 
 		return new self( $settings, $log, $dispatcher, $admin );
@@ -181,6 +182,7 @@ final class Plugin {
 		delete_option( Settings::OPTION );
 		delete_option( Settings::PINS_OPTION );
 		delete_transient( AlertNotifier::LOCK_TRANSIENT );
+		delete_metadata( 'user', 0, AdminPage::KEY_NOTICE_META, '', true );
 		wp_clear_scheduled_hook( self::CRON_HOOK );
 	}
 }

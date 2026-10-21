@@ -66,6 +66,15 @@ class Settings {
 	}
 
 	/**
+	 * Why the encryption key may be weak, if it is (see Crypto::key_problem()).
+	 *
+	 * @return string|null
+	 */
+	public function encryption_key_problem() {
+		return Crypto::key_problem( $this->constant_reader );
+	}
+
+	/**
 	 * Supported connection types and their fields.
 	 *
 	 * @return array<string, array{label: string, fields: array<string, array{label: string, type: string, default?: mixed, options?: array<string, string>}>}>

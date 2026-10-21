@@ -63,7 +63,70 @@ class RedactorTest extends TestCase {
 			'woocommerce generated'      => array( '<p>Your password has been automatically generated: <strong>WooGen123</strong></p>', 'WooGen123' ),
 			'minified html'              => array( '<p>Hi Jo,</p><p>Username: jo</p><p>Password: Min1fied</p>', 'Min1fied' ),
 			'double url-encoded link'    => array( 'https://t.example/c?u=https%253A%252F%252Fe.com%252Fwp-login.php%253Faction%253Drp%2526key%253DDBLKEY', 'DBLKEY' ),
+			// Issue #4.
+			'bare verification code'     => array( 'Your verification code is 482913. It expires in 10 minutes.', '482913' ),
+			'two-factor prompt'          => array( "Enter this code to finish logging in:\n\n<strong>731 204</strong>", '731 204' ),
+			'pin with colon'             => array( 'Your PIN: 5821', '5821' ),
+			'otp in html'                => array( '<p>OTP <b>90817265</b></p>', '90817265' ),
+			'passcode'                   => array( 'Use passcode 4401 to join', '4401' ),
+			'code before label'          => array( '662019 is your login code', '662019' ),
+			'password without colon'     => array( 'Your new password is Fl4mingo-77 so keep it safe', 'Fl4mingo-77' ),
+			'html password without colon' => array( '<p>Your password is <strong>Gr33nT3a</strong></p>', 'Gr33nT3a' ),
+			'oauth style code parameter' => array( 'https://e.com/callback?state=x&code=OAUTHCODE1', 'OAUTHCODE1' ),
+			'magic link login_key'       => array( 'https://e.com/?login_key=LKEY42&user=3', 'LKEY42' ),
+			'access token parameter'     => array( 'https://e.com/approve?access_token=ATOK99', 'ATOK99' ),
 		);
+	}
+
+	/**
+	 * Issue #4: ordinary numbers and prose must survive.
+	 *
+	 * @dataProvider ordinary
+	 */
+	public function test_ordinary_numbers_and_prose_are_not_redacted( $body ) {
+		$result = ( new Redactor() )->redact( $body );
+		$this->assertFalse( $result['redacted'], $result['body'] );
+		$this->assertSame( $body, $result['body'] );
+	}
+
+	public function ordinary() {
+		return array(
+			'order number'         => array( 'Your order #12345 has shipped. Invoice 20261021 attached.' ),
+			'discount code'        => array( 'Use discount code SAVE10 for 10% off.' ),
+			'postcode'             => array( 'Delivery postcode BD23 2HQ, post code 1234, zip code 90210, area code 0113' ),
+			'code with no number'  => array( 'Your code expires soon. Request a new one.' ),
+			'password prose'       => array( 'Your password is incorrect. Your password is now set. The password is required.' ),
+			'year after label'     => array( 'Code of conduct, updated 2026' ),
+			'phone number'         => array( 'Call 01756 700000 for help with your PIN reset.' ),
+		);
+	}
+
+	public function test_several_codes_are_redacted_without_withholding_the_body() {
+		$result = ( new Redactor() )->redact( 'Use code 1234 or 5678 to log in.' );
+		$this->assertTrue( $result['redacted'] );
+		$this->assertStringNotContainsString( '1234', $result['body'] );
+		$this->assertNotSame( Redactor::WITHHELD, $result['body'] );
+	}
+
+	public function test_subject_is_redacted_with_the_short_placeholder() {
+		$redactor = new Redactor();
+
+		$this->assertSame(
+			array(
+				'body'     => 'Order 482913 shipped',
+				'redacted' => false,
+			),
+			$redactor->redact_subject( 'Order 482913 shipped' ),
+			'ordinary subject untouched'
+		);
+		$this->assertSame(
+			array(
+				'body'     => Redactor::PLACEHOLDER . ' is your login code',
+				'redacted' => true,
+			),
+			$redactor->redact_subject( '482913 is your login code' )
+		);
+		$this->assertSame( Redactor::PLACEHOLDER, $redactor->redact_subject( 'Login %3Faction%3Drp%26key%3DX' )['body'], 'encoded secret withholds the subject, not with the body notice' );
 	}
 
 	public function test_encoded_secret_withholds_the_whole_body() {
@@ -117,13 +180,13 @@ class RedactorTest extends TestCase {
 	public function test_patterns_are_filterable() {
 		Filters\expectApplied( 'codo_mailer_redaction_patterns' )->once()->andReturnUsing(
 			static function ( $patterns ) {
-				$patterns[] = '/OTP: \d{6}/';
+				$patterns[] = '/Voucher: \w{6}/';
 				$patterns[] = 42;
 				return $patterns;
 			}
 		);
 
-		$result = ( new Redactor() )->redact( 'Your OTP: 123456' );
+		$result = ( new Redactor() )->redact( 'Your Voucher: AB12CD' );
 		$this->assertTrue( $result['redacted'] );
 		$this->assertSame( 'Your ' . Redactor::PLACEHOLDER, $result['body'] );
 	}

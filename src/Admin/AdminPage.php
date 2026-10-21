@@ -10,7 +10,9 @@ namespace CodoDigital\Mailer\Admin;
 use CodoDigital\Mailer\Log\LogRepository;
 use CodoDigital\Mailer\Mail\Dispatcher;
 use CodoDigital\Mailer\Mail\InvalidMessageException;
+use CodoDigital\Mailer\Security\Crypto;
 use CodoDigital\Mailer\Settings\Settings;
+use CodoDigital\Mailer\Transport\SmtpTransport;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -24,6 +26,11 @@ class AdminPage {
 
 	const SLUG     = 'codo-mailer';
 	const PER_PAGE = 25;
+
+	/**
+	 * User meta recording which encryption key notice the user dismissed.
+	 */
+	const KEY_NOTICE_META = 'codo_mailer_key_notice_dismissed';
 
 	/**
 	 * Settings.
@@ -91,6 +98,7 @@ class AdminPage {
 		add_action( 'admin_post_codo_mailer_test', array( $this, 'handle_test' ) );
 		add_action( 'admin_post_codo_mailer_resend', array( $this, 'handle_resend' ) );
 		add_action( 'admin_post_codo_mailer_clear_log', array( $this, 'handle_clear_log' ) );
+		add_action( 'admin_post_codo_mailer_dismiss_key_notice', array( $this, 'handle_dismiss_key_notice' ) );
 		add_filter( 'plugin_action_links_' . plugin_basename( CODO_MAILER_FILE ), array( $this, 'action_links' ) );
 	}
 
@@ -104,7 +112,7 @@ class AdminPage {
 	 * @return string
 	 */
 	public function capability() {
-		$default = is_multisite() ? 'manage_network_options' : 'manage_options';
+		$default = $this->admin_capability();
 
 		/**
 		 * Filters the capability required to manage Codo Mailer.
@@ -113,6 +121,30 @@ class AdminPage {
 		 */
 		$capability = apply_filters( 'codo_mailer_capability', $default );
 		return is_string( $capability ) && '' !== $capability ? $capability : $default;
+	}
+
+	/**
+	 * The unfiltered capability: manage_options, or manage_network_options
+	 * on multisite.
+	 *
+	 * @return string
+	 */
+	public function admin_capability() {
+		return is_multisite() ? 'manage_network_options' : 'manage_options';
+	}
+
+	/**
+	 * Whether the current user may read logged message bodies and turn off
+	 * redaction.
+	 *
+	 * Both can expose working password-reset links, so they stay with
+	 * administrators even when codo_mailer_capability opens the rest of the
+	 * screen to a lower role.
+	 *
+	 * @return bool
+	 */
+	public function can_view_secrets() {
+		return current_user_can( $this->admin_capability() );
 	}
 
 	/**
@@ -247,7 +279,7 @@ class AdminPage {
 			return;
 		}
 		delete_transient( $key );
-		$type = isset( $notice['type'] ) && 'error' === $notice['type'] ? 'error' : 'success';
+		$type = isset( $notice['type'] ) && in_array( $notice['type'], array( 'error', 'warning' ), true ) ? $notice['type'] : 'success';
 		printf(
 			'<div class="notice notice-%s is-dismissible"><p>%s</p></div>',
 			esc_attr( $type ),
@@ -261,6 +293,8 @@ class AdminPage {
 	 * @return void
 	 */
 	private function render_settings_tab() {
+		$this->render_key_notice();
+
 		echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';
 		echo '<input type="hidden" name="action" value="codo_mailer_save">';
 		wp_nonce_field( 'codo_mailer_save' );
@@ -277,7 +311,14 @@ class AdminPage {
 
 		echo '<h2>' . esc_html__( 'Email log', 'codo-mailer' ) . '</h2><table class="form-table" role="presentation">';
 		$this->checkbox_row( 'log_enabled', __( 'Log emails', 'codo-mailer' ), __( 'Keep a record of sent and failed emails so you can inspect and resend them.', 'codo-mailer' ) );
-		$this->checkbox_row( 'redact_sensitive', __( 'Redact secrets', 'codo-mailer' ), __( 'Strip password-reset and one-time login links from logged emails (recommended).', 'codo-mailer' ) );
+		$this->checkbox_row(
+			'redact_sensitive',
+			__( 'Redact secrets', 'codo-mailer' ),
+			$this->can_view_secrets()
+				? __( 'Strip password-reset and one-time login links from logged emails (recommended).', 'codo-mailer' )
+				: __( 'Strip password-reset and one-time login links from logged emails. Only an administrator can change this.', 'codo-mailer' ),
+			! $this->can_view_secrets()
+		);
 		$this->text_row( 'log_retention_days', __( 'Keep logs for (days)', 'codo-mailer' ), 'number' );
 		echo '</table>';
 
@@ -288,6 +329,38 @@ class AdminPage {
 
 		submit_button( __( 'Save settings', 'codo-mailer' ) );
 		echo '</form>';
+	}
+
+	/**
+	 * Warn when stored secrets would be readable from a database dump alone.
+	 *
+	 * Dismissal is per user and per problem, so a different problem (or the
+	 * same one returning after a fix) shows again.
+	 *
+	 * @return void
+	 */
+	private function render_key_notice() {
+		$problem = $this->settings->encryption_key_problem();
+		if ( null === $problem || get_user_meta( get_current_user_id(), self::KEY_NOTICE_META, true ) === $problem ) {
+			return;
+		}
+
+		if ( 'short_key' === $problem ) {
+			$text = sprintf(
+				/* translators: %d: minimum number of characters. */
+				__( 'CODO_MAILER_ENCRYPTION_KEY is shorter than %d characters, so the API keys and passwords saved here are only as safe as a short passphrase. Replace it with a long random value.', 'codo-mailer' ),
+				Crypto::MIN_KEY_LENGTH
+			);
+		} else {
+			$text = __( 'Some of WordPress\'s security keys and salts are not set in wp-config.php, so WordPress stores them in the database. Anyone with a database backup could then decrypt the API keys and passwords saved here. Define CODO_MAILER_ENCRYPTION_KEY in wp-config.php, then re-enter your saved secrets.', 'codo-mailer' );
+		}
+
+		echo '<div class="notice notice-warning inline"><p>' . esc_html( $text ) . '</p>';
+		echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '"><p>';
+		echo '<input type="hidden" name="action" value="codo_mailer_dismiss_key_notice">';
+		printf( '<input type="hidden" name="problem" value="%s">', esc_attr( $problem ) );
+		wp_nonce_field( 'codo_mailer_dismiss_key_notice' );
+		echo '<button type="submit" class="button-link">' . esc_html__( 'Dismiss', 'codo-mailer' ) . '</button></p></form></div>';
 	}
 
 	/**
@@ -305,6 +378,15 @@ class AdminPage {
 		echo '<h2>' . esc_html( $title ) . '</h2>';
 		if ( isset( $config['error'] ) ) {
 			echo '<div class="notice notice-error inline"><p>' . esc_html( $config['error'] ) . '</p></div>';
+		}
+		if ( 'smtp' === $config['type'] && SmtpTransport::is_plaintext_auth( $config ) ) {
+			echo '<div class="notice notice-warning inline"><p>' . esc_html(
+				sprintf(
+					/* translators: %s: SMTP host. */
+					__( 'This connection logs in to %s without encryption, so the SMTP username and password are sent in plain text. Set Encryption to TLS or SSL unless this is a trusted internal relay.', 'codo-mailer' ),
+					$config['host']
+				)
+			) . '</p></div>';
 		}
 		if ( 'backup' === $slot ) {
 			echo '<p>' . esc_html__( 'Used only when the primary connection fails.', 'codo-mailer' ) . '</p>';
@@ -454,10 +536,11 @@ class AdminPage {
 	 * @param string $key         Setting key.
 	 * @param string $label       Label.
 	 * @param string $description Checkbox text.
+	 * @param bool   $read_only   Show the value but don't allow changes.
 	 * @return void
 	 */
-	private function checkbox_row( $key, $label, $description ) {
-		$locked = $this->settings->is_constant( $key );
+	private function checkbox_row( $key, $label, $description, $read_only = false ) {
+		$locked = $this->settings->is_constant( $key ) || $read_only;
 		printf(
 			'<tr><th scope="row">%1$s</th><td><label><input type="checkbox" name="codo_mailer[%2$s]" value="1"%3$s%4$s> %5$s</label>',
 			esc_html( $label ),
@@ -466,7 +549,7 @@ class AdminPage {
 			disabled( $locked, true, false ),
 			esc_html( $description )
 		);
-		if ( $locked ) {
+		if ( $this->settings->is_constant( $key ) ) {
 			$this->constant_hint();
 		}
 		echo '</td></tr>';
@@ -648,7 +731,11 @@ class AdminPage {
 		}
 
 		echo '<h2>' . esc_html__( 'Body', 'codo-mailer' ) . '</h2>';
-		echo '<pre style="white-space:pre-wrap;max-height:30em;overflow:auto;background:#fff;padding:1em;border:1px solid #c3c4c7">' . esc_html( (string) $entry['body'] ) . '</pre>';
+		if ( $this->can_view_secrets() ) {
+			echo '<pre style="white-space:pre-wrap;max-height:30em;overflow:auto;background:#fff;padding:1em;border:1px solid #c3c4c7">' . esc_html( (string) $entry['body'] ) . '</pre>';
+		} else {
+			echo '<p class="description">' . esc_html__( 'Only an administrator can view message bodies, because they can contain password-reset links.', 'codo-mailer' ) . '</p>';
+		}
 
 		if ( ! $entry['redacted'] ) {
 			echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';
@@ -669,6 +756,10 @@ class AdminPage {
 		$this->guard( 'codo_mailer_save' );
 		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized, WordPress.Security.NonceVerification.Missing -- nonce checked in guard(); sanitised field by field in Settings::sanitize().
 		$input = isset( $_POST['codo_mailer'] ) && is_array( $_POST['codo_mailer'] ) ? wp_unslash( $_POST['codo_mailer'] ) : array();
+		if ( ! $this->can_view_secrets() ) {
+			// A lower role granted by codo_mailer_capability can't change redaction.
+			$input['redact_sensitive'] = (bool) $this->settings->get( 'redact_sensitive' );
+		}
 		$this->settings->save( $input );
 		$this->redirect( 'settings', 'success', __( 'Settings saved.', 'codo-mailer' ) );
 	}
@@ -731,12 +822,45 @@ class AdminPage {
 			return;
 		}
 
-		$result = $this->dispatcher->resend( $entry );
+		$skipped = $this->dispatcher->resend_attachments( $entry )['skip'];
+		$result  = $this->dispatcher->resend( $entry );
+		if ( true === $result && array() !== $skipped ) {
+			$this->redirect(
+				'log',
+				'warning',
+				sprintf(
+					/* translators: %s: comma-separated attachment file names. */
+					_n(
+						'Email resent without this attachment, because it is missing or has changed since the email was first sent: %s',
+						'Email resent without these attachments, because they are missing or have changed since the email was first sent: %s',
+						count( $skipped ),
+						'codo-mailer'
+					),
+					implode( ', ', $skipped )
+				)
+			);
+			return;
+		}
 		if ( true === $result ) {
 			$this->redirect( 'log', 'success', __( 'Email resent.', 'codo-mailer' ) );
 			return;
 		}
 		$this->redirect( 'log', 'error', $result, array( 'entry' => $id ) );
+	}
+
+	/**
+	 * Hide the encryption key notice for the current user.
+	 *
+	 * @return void
+	 */
+	public function handle_dismiss_key_notice() {
+		$this->guard( 'codo_mailer_dismiss_key_notice' );
+		$problem = isset( $_POST['problem'] ) ? sanitize_key( wp_unslash( $_POST['problem'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verified in guard().
+		if ( in_array( $problem, array( 'database_salts', 'short_key' ), true ) ) {
+			update_user_meta( get_current_user_id(), self::KEY_NOTICE_META, $problem );
+		}
+		wp_safe_redirect( $this->url( 'settings' ) );
+		call_user_func( $this->terminate );
 	}
 
 	/**

@@ -3,7 +3,7 @@
  * Plugin Name:       Codo Mailer
  * Plugin URI:        https://github.com/Codo-Digital-Ltd/codo-mailer
  * Description:       Secure-by-default email delivery for WordPress: SMTP, Amazon SES, Postmark, Mailgun, Brevo and SendGrid, with an email log, resend, backup connection and failure alerts. Free, no upsells.
- * Version:           1.0.1
+ * Version:           1.0.2
  * Requires at least: 6.2
  * Requires PHP:      7.4
  * Author:            Codo Digital
@@ -17,7 +17,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'CODO_MAILER_VERSION', '1.0.1' );
+define( 'CODO_MAILER_VERSION', '1.0.2' );
 define( 'CODO_MAILER_FILE', __FILE__ );
 define( 'CODO_MAILER_DIR', __DIR__ );
 

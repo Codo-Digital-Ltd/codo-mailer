@@ -4,6 +4,7 @@ namespace CodoDigital\Mailer\Tests\Unit\Alerts;
 use Brain\Monkey\Filters;
 use Brain\Monkey\Functions;
 use CodoDigital\Mailer\Alerts\AlertNotifier;
+use CodoDigital\Mailer\Mail\Redactor;
 use CodoDigital\Mailer\Settings\Settings;
 use CodoDigital\Mailer\Tests\TestCase;
 use CodoDigital\Mailer\Transport\HttpClient;
@@ -93,6 +94,41 @@ class AlertNotifierTest extends TestCase {
 
 		// Second failure inside the window: throttled.
 		$this->assertSame( array(), $this->notifier()->notify( $this->message(), 'again' ) );
+	}
+
+	public function test_alert_subject_is_redacted() {
+		$this->config = array(
+			'alert_email'      => 'ops@example.com',
+			'redact_sensitive' => true,
+		);
+
+		Functions\expect( 'wp_mail' )->once()->with(
+			'ops@example.com',
+			\Mockery::any(),
+			\Mockery::on(
+				static function ( $body ) {
+					return false === strpos( $body, '482913' ) && false !== strpos( $body, Redactor::PLACEHOLDER . ' is your login code' );
+				}
+			)
+		)->andReturn( true );
+
+		$this->notifier()->notify( $this->message( array( 'subject' => '482913 is your login code' ) ), 'boom' );
+	}
+
+	public function test_alert_subject_is_kept_when_redaction_is_off() {
+		$this->config = array( 'alert_email' => 'ops@example.com' );
+
+		Functions\expect( 'wp_mail' )->once()->with(
+			'ops@example.com',
+			\Mockery::any(),
+			\Mockery::on(
+				static function ( $body ) {
+					return false !== strpos( $body, '"482913 is your login code"' );
+				}
+			)
+		)->andReturn( true );
+
+		$this->notifier()->notify( $this->message( array( 'subject' => '482913 is your login code' ) ), 'boom' );
 	}
 
 	public function test_guard_is_released_even_if_wp_mail_throws() {

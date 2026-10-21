@@ -21,6 +21,9 @@ class AdminPageTest extends TestCase {
 	/** @var array<string, string> */
 	private $pins = array();
 
+	/** @var array<string, mixed> User meta for the current user. */
+	private $user_meta = array();
+
 	/** @var array<string, mixed> */
 	private $transients = array();
 
@@ -30,7 +33,7 @@ class AdminPageTest extends TestCase {
 	/** @var int */
 	private $terminated = 0;
 
-	/** @var bool */
+	/** @var bool|string[] True/false for every capability, or the capabilities the user has. */
 	private $can = true;
 
 	/** @var string[] Nonce actions checked. */
@@ -55,8 +58,8 @@ class AdminPageTest extends TestCase {
 
 		Functions\stubs(
 			array(
-				'current_user_can'     => function () {
-					return $this->can;
+				'current_user_can'     => function ( $capability ) {
+					return is_array( $this->can ) ? in_array( $capability, $this->can, true ) : $this->can;
 				},
 				'wp_die'               => static function ( $message ) {
 					throw new \RuntimeException( 'wp_die: ' . $message );
@@ -95,6 +98,13 @@ class AdminPageTest extends TestCase {
 					return true;
 				},
 				'get_current_user_id'  => 3,
+				'get_user_meta'        => function ( $user, $key ) {
+					return isset( $this->user_meta[ $key ] ) ? $this->user_meta[ $key ] : '';
+				},
+				'update_user_meta'     => function ( $user, $key, $value ) {
+					$this->user_meta[ $key ] = $value;
+					return true;
+				},
 				'wp_get_current_user'  => static function () {
 					return (object) array( 'user_email' => 'admin@example.com' );
 				},
@@ -119,7 +129,11 @@ class AdminPageTest extends TestCase {
 		$this->settings   = new Settings(
 			new Crypto( 'k' ),
 			function ( $name ) {
-				return isset( $this->constants[ $name ] ) ? $this->constants[ $name ] : null;
+				if ( array_key_exists( $name, $this->constants ) ) {
+					return $this->constants[ $name ];
+				}
+				// Well-configured salts unless a test says otherwise (null = undefined).
+				return in_array( $name, Crypto::SALT_CONSTANTS, true ) ? 'salt-' . $name . '-0123456789abcdef' : null;
 			}
 		);
 	}
@@ -155,7 +169,7 @@ class AdminPageTest extends TestCase {
 		$page = $this->page();
 		$page->register();
 
-		foreach ( array( 'admin_init', 'admin_menu', 'admin_enqueue_scripts', 'admin_post_codo_mailer_save', 'admin_post_codo_mailer_test', 'admin_post_codo_mailer_resend', 'admin_post_codo_mailer_clear_log' ) as $hook ) {
+		foreach ( array( 'admin_init', 'admin_menu', 'admin_enqueue_scripts', 'admin_post_codo_mailer_save', 'admin_post_codo_mailer_test', 'admin_post_codo_mailer_resend', 'admin_post_codo_mailer_clear_log', 'admin_post_codo_mailer_dismiss_key_notice' ) as $hook ) {
 			$this->assertNotFalse( has_action( $hook ), $hook );
 		}
 		$this->assertNotFalse( has_filter( 'plugin_action_links_codo-mailer/codo-mailer.php' ) );
@@ -365,6 +379,72 @@ class AdminPageTest extends TestCase {
 		$this->assertStringContainsString( '<div class="notice notice-error inline"><p>The password for this connection is set in wp-config.php', $html );
 	}
 
+	public function test_plaintext_smtp_auth_is_warned_about() {
+		$this->option = array(
+			'primary' => array(
+				'type'       => 'smtp',
+				'host'       => 'mail.example.com',
+				'encryption' => 'none',
+				'auth'       => true,
+				'username'   => 'u',
+			),
+		);
+		$this->assertStringContainsString( '<div class="notice notice-warning inline"><p>This connection logs in to mail.example.com without encryption', $this->render() );
+
+		$this->option['primary']['host'] = 'localhost';
+		$this->assertStringNotContainsString( 'without encryption', $this->render() );
+
+		$this->option['primary']['host']       = 'mail.example.com';
+		$this->option['primary']['encryption'] = 'tls';
+		$this->assertStringNotContainsString( 'without encryption', $this->render() );
+	}
+
+	public function test_key_notice_when_salts_live_in_the_database() {
+		$this->constants = array( 'SECURE_AUTH_SALT' => 'put your unique phrase here' );
+		$html            = $this->render();
+		$this->assertStringContainsString( '<div class="notice notice-warning inline"><p>Some of WordPress&#039;s security keys and salts are not set in wp-config.php', $html );
+		$this->assertStringContainsString( 'name="action" value="codo_mailer_dismiss_key_notice"', $html );
+		$this->assertStringContainsString( 'name="problem" value="database_salts"', $html );
+
+		$this->constants = array( 'CODO_MAILER_ENCRYPTION_KEY' => str_repeat( 'k', 44 ) );
+		$this->assertStringNotContainsString( 'codo_mailer_dismiss_key_notice', $this->render(), 'a strong key makes the salts irrelevant' );
+
+		$this->constants = array();
+		$this->assertStringNotContainsString( 'codo_mailer_dismiss_key_notice', $this->render(), 'all salts set' );
+	}
+
+	public function test_key_notice_for_a_short_key() {
+		$this->constants = array( 'CODO_MAILER_ENCRYPTION_KEY' => 'hunter2' );
+		$html            = $this->render();
+		$this->assertStringContainsString( 'CODO_MAILER_ENCRYPTION_KEY is shorter than 32 characters', $html );
+		$this->assertStringContainsString( 'name="problem" value="short_key"', $html );
+	}
+
+	public function test_dismissing_the_key_notice_is_per_problem() {
+		$this->constants = array( 'AUTH_KEY' => null );
+		$_POST           = array( 'problem' => 'database_salts' );
+
+		$this->page()->handle_dismiss_key_notice();
+		$this->assertSame( array( 'codo_mailer_dismiss_key_notice' ), $this->nonces );
+		$this->assertSame( 'database_salts', $this->user_meta[ AdminPage::KEY_NOTICE_META ] );
+		$this->assertStringContainsString( 'tab=settings', $this->redirected_to );
+		$this->assertSame( 1, $this->terminated );
+		$this->assertStringNotContainsString( 'codo_mailer_dismiss_key_notice', $this->render() );
+
+		$this->constants = array( 'CODO_MAILER_ENCRYPTION_KEY' => 'short' );
+		$this->assertStringContainsString( 'value="short_key"', $this->render(), 'a different problem shows again' );
+
+		$_POST = array( 'problem' => 'anything-else' );
+		$this->page()->handle_dismiss_key_notice();
+		$this->assertSame( 'database_salts', $this->user_meta[ AdminPage::KEY_NOTICE_META ], 'unknown values are ignored' );
+	}
+
+	public function test_dismissing_the_key_notice_requires_the_capability() {
+		$this->can = false;
+		$this->expectExceptionMessage( 'wp_die' );
+		$this->page()->handle_dismiss_key_notice();
+	}
+
 	public function test_constant_values_are_read_only() {
 		$this->constants = array(
 			'CODO_MAILER_FROM_EMAIL'       => 'host@example.com',
@@ -397,6 +477,12 @@ class AdminPageTest extends TestCase {
 
 		$this->transients['codo_mailer_notice_3'] = array( 'message' => 'ok' );
 		$this->assertStringContainsString( 'notice-success', $this->render() );
+
+		$this->transients['codo_mailer_notice_3'] = array(
+			'type'    => 'warning',
+			'message' => 'careful',
+		);
+		$this->assertStringContainsString( 'notice-warning', $this->render() );
 
 		$this->transients['codo_mailer_notice_3'] = 'corrupt';
 		$this->assertStringNotContainsString( 'notice-', $this->render() );
@@ -527,6 +613,81 @@ class AdminPageTest extends TestCase {
 		$this->page()->handle_save();
 	}
 
+	/**
+	 * Issue #9: a role granted access through codo_mailer_capability.
+	 */
+	private function as_delegated_role() {
+		\Brain\Monkey\Filters\expectApplied( 'codo_mailer_capability' )->andReturn( 'edit_pages' );
+		$this->can = array( 'edit_pages' );
+	}
+
+	public function test_delegated_role_cannot_view_message_bodies() {
+		$this->as_delegated_role();
+		$_GET = array( 'tab' => 'log', 'entry' => '12' );
+		$this->log->shouldReceive( 'find' )->with( 12 )->andReturn( $this->log_row() );
+
+		$html = $this->render();
+
+		$this->assertStringNotContainsString( 'Body&lt;/p&gt;', $html );
+		$this->assertStringContainsString( 'Only an administrator can view message bodies', $html );
+		$this->assertStringContainsString( 'cc@example.org', $html, 'the rest of the entry is still shown' );
+		$this->assertFalse( $this->page()->can_view_secrets() );
+	}
+
+	public function test_delegated_role_cannot_change_redaction() {
+		$this->as_delegated_role();
+
+		$html = $this->render();
+		$this->assertMatchesRegularExpression( '~name="codo_mailer\[redact_sensitive\]" value="1" checked="checked" disabled="disabled"~', $html );
+		$this->assertStringContainsString( 'Only an administrator can change this.', $html );
+
+		$_POST['codo_mailer'] = array( 'from_name' => 'Shop' );
+		Functions\expect( 'update_option' )->once()->with(
+			Settings::OPTION,
+			\Mockery::on(
+				static function ( $v ) {
+					return true === $v['redact_sensitive'] && 'Shop' === $v['from_name'];
+				}
+			),
+			false
+		);
+		$this->page()->handle_save();
+	}
+
+	public function test_delegated_role_cannot_turn_redaction_back_on_or_off_either_way() {
+		$this->as_delegated_role();
+		$this->option         = array( 'redact_sensitive' => false );
+		$_POST['codo_mailer'] = array( 'redact_sensitive' => '1' );
+		Functions\expect( 'update_option' )->once()->with(
+			Settings::OPTION,
+			\Mockery::on(
+				static function ( $v ) {
+					return false === $v['redact_sensitive'];
+				}
+			),
+			false
+		);
+		$this->page()->handle_save();
+	}
+
+	public function test_administrators_keep_full_access_when_the_capability_is_lowered() {
+		\Brain\Monkey\Filters\expectApplied( 'codo_mailer_capability' )->andReturn( 'edit_pages' );
+		$this->can = array( 'edit_pages', 'manage_options' );
+
+		$this->assertTrue( $this->page()->can_view_secrets() );
+		$_POST['codo_mailer'] = array();
+		Functions\expect( 'update_option' )->once()->with(
+			Settings::OPTION,
+			\Mockery::on(
+				static function ( $v ) {
+					return false === $v['redact_sensitive'];
+				}
+			),
+			false
+		);
+		$this->page()->handle_save();
+	}
+
 	public function test_handle_test_validates_address() {
 		$_POST['to'] = 'not-an-email';
 		$this->page()->handle_test();
@@ -576,6 +737,7 @@ class AdminPageTest extends TestCase {
 	public function test_handle_resend_paths() {
 		$_POST['entry'] = '12';
 		$this->log->shouldReceive( 'find' )->with( 12 )->andReturn( null, $this->log_row(), $this->log_row() );
+		$this->dispatcher->shouldReceive( 'resend_attachments' )->andReturn( array( 'keep' => array(), 'skip' => array() ) );
 		$this->dispatcher->shouldReceive( 'resend' )->twice()->andReturn( true, 'Resending failed.' );
 
 		$this->page()->handle_resend();
@@ -588,6 +750,23 @@ class AdminPageTest extends TestCase {
 		$this->assertSame( 'Resending failed.', $this->notice()['message'] );
 		$this->assertStringContainsString( 'entry=12', $this->redirected_to );
 		$this->assertSame( array_fill( 0, 3, 'codo_mailer_resend_12' ), $this->nonces, 'nonce is bound to the entry ID' );
+	}
+
+	public function test_handle_resend_warns_about_skipped_attachments() {
+		$_POST['entry'] = '12';
+		$this->log->shouldReceive( 'find' )->with( 12 )->andReturn( $this->log_row() );
+		$this->dispatcher->shouldReceive( 'resend_attachments' )->andReturn(
+			array(
+				'keep' => array(),
+				'skip' => array( 'report.pdf', 'b.pdf' ),
+			)
+		);
+		$this->dispatcher->shouldReceive( 'resend' )->once()->andReturn( true );
+
+		$this->page()->handle_resend();
+		$this->assertSame( 'warning', $this->notice()['type'] );
+		$this->assertStringContainsString( 'without these attachments', $this->notice()['message'] );
+		$this->assertStringEndsWith( ': report.pdf, b.pdf', $this->notice()['message'] );
 	}
 
 	public function test_handle_resend_without_an_id() {

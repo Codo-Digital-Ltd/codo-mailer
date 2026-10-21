@@ -4,7 +4,7 @@ Tags: smtp, email, amazon ses, email log, deliverability
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.1
+Stable tag: 1.0.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -40,7 +40,7 @@ API providers are used over HTTPS, so blocked SMTP ports on your host don't matt
 
 Email logs hold password-reset links, so a leaky log is a site takeover waiting to happen. Codo Mailer is designed around that:
 
-* Password-reset, set-password and email-confirmation links, one-time tokens and plaintext "Password:" lines are **redacted** before an email is logged, and those emails cannot be resent from the log. Redaction is best-effort, so as a fail-safe, if a secret still shows up once the body is decoded, the whole body is left out of the log.
+* Password-reset, set-password and email-confirmation links, one-time tokens, verification codes and PINs, and plaintext passwords are **redacted** from the body and subject before an email is logged or included in an alert, and those emails cannot be resent from the log. Redaction is best-effort, so as a fail-safe, if a secret still shows up once the body is decoded, the whole body is left out of the log.
 * The log is only ever shown on the admin screen to administrators (`manage_options`; on multisite, super admins only, because whoever controls mail can read any user's reset email). There are **no REST or AJAX endpoints** for it.
 * API keys and passwords are **encrypted at rest** (libsodium), so a database dump alone does not reveal them.
 * Or keep credentials out of the database entirely with **`wp-config.php` constants**.
@@ -71,14 +71,16 @@ Connection field names: SMTP `host`, `port`, `encryption` (tls, ssl, none), `aut
 
 If an SMTP password is a constant but the host, port, encryption or username are not, the first successful send locks the connection to that server. Changing any of them in the admin screen then stops the connection, so the password can't be redirected to another server. To move servers, set the new values as constants too.
 
-To use your own encryption key instead of the site salts, define `CODO_MAILER_ENCRYPTION_KEY`. If you rotate your salts without one, re-enter saved API keys and passwords (secrets set as constants are unaffected).
+To use your own encryption key instead of the site salts, define `CODO_MAILER_ENCRYPTION_KEY`. See "How do I set a strong encryption key?" in the FAQ. If you rotate your salts without one, re-enter saved API keys and passwords (secrets set as constants are unaffected).
 
 = For developers =
 
-* `codo_mailer_redaction_patterns` filter: add regular expressions for other secret links (e.g. magic-login tokens).
+* `codo_mailer_redaction_patterns` filter: add regular expressions for other secrets (e.g. magic-login tokens). They apply to the subject as well as the body.
 * `codo_mailer_transport` filter: provide a transport for a custom connection type.
 * `codo_mailer_alert_interval` filter: change the alert throttle (seconds).
-* `codo_mailer_capability` filter: change who can manage the plugin.
+* `codo_mailer_attachment_size_limit` filter: change the largest total attachment size an API connection will send (bytes; 10 MB for Postmark, 25 MB otherwise, 0 for no cap). Larger emails fail on that connection and go to the backup.
+* `codo_mailer_smtp_allow_plaintext_auth` filter: return false to refuse SMTP logins over an unencrypted connection (other than to localhost).
+* `codo_mailer_capability` filter: change who can manage the plugin. Read "Can I let editors or shop managers manage email?" in the FAQ first.
 * `codo_mailer_sent` action: fires after delivery with the message, connection and provider result.
 
 Source, issues and tests: [github.com/Codo-Digital-Ltd/codo-mailer](https://github.com/Codo-Digital-Ltd/codo-mailer).
@@ -125,6 +127,28 @@ Over SMTP, Amazon SES and Mailgun, yes. Postmark, Brevo and SendGrid require at 
 = Will a failure slow my site down? =
 
 Each provider call times out after 15 seconds. Failure alerts are sent at the end of the request, after the page has been delivered where the server supports it, so visitors don't wait for them.
+
+= Why does the settings screen warn about SMTP without encryption? =
+
+With Encryption set to None and Authenticate on, your SMTP username and password are sent to the server in plain text, where anyone on the network path can read them. Codo Mailer also turns off automatic STARTTLS in this mode, so this happens even if the server supports encryption. Choose TLS or SSL unless the server is a trusted relay on your own network. Connections to localhost are not warned about. Hosts can refuse plaintext logins outright with the `codo_mailer_smtp_allow_plaintext_auth` filter.
+
+= How do I set a strong encryption key? =
+
+Saved API keys and passwords are encrypted with a key derived from WordPress's `AUTH_KEY`, `AUTH_SALT`, `SECURE_AUTH_KEY` and `SECURE_AUTH_SALT`. If any of those is missing from wp-config.php, or still says "put your unique phrase here", WordPress stores it in the database, and a database backup alone is then enough to decrypt your secrets. The settings screen warns you when this is the case.
+
+To fix it, add a dedicated key of at least 32 random bytes to wp-config.php. Generate one with `php -r 'echo base64_encode( random_bytes( 32 ) ), PHP_EOL;'` (or `wp eval 'echo base64_encode( random_bytes( 32 ) );'`) and add:
+
+`define( 'CODO_MAILER_ENCRYPTION_KEY', 'paste-the-value-here' );`
+
+Use a random value, not a memorable passphrase: the key is hashed without key stretching, so a short phrase is a weak key. Keys shorter than 32 characters are warned about.
+
+Setting or changing the key makes existing saved secrets unreadable. To rotate it: set the new key, then re-enter each API key and password on the settings screen (secrets defined as constants in wp-config.php are unaffected). Keep the key out of version control and out of database backups, which is the point of keeping it in wp-config.php.
+
+= Can I let editors or shop managers manage email? =
+
+Yes, with the `codo_mailer_capability` filter, for example `add_filter( 'codo_mailer_capability', fn() => 'edit_pages' );`. The default is `manage_options`, or `manage_network_options` on multisite. Only give it to people you would trust with every account on the site. Anyone who can manage Codo Mailer can change the connection, so they can route all of the site's email, including password resets, through a server they control.
+
+Even with the capability lowered, two things stay with administrators: reading message bodies in the email log, and turning **Redact secrets** off. Bodies can contain working password-reset links, and redaction is what keeps them out of the log. Other users see the log's recipients, subjects and errors, and can still resend emails.
 
 == External services ==
 
@@ -179,6 +203,14 @@ If you enter a webhook URL (for example a Slack incoming webhook), Codo Mailer p
 
 == Changelog ==
 
+= 1.0.2 =
+* Security: Resend no longer attaches a file that has changed since the email was sent, or is missing. The log says which attachments were left out.
+* Security: redaction now also catches one-time codes and PINs, passwords written without a colon, and more login-link parameters, and it covers the subject line in the log and in failure alerts.
+* Security: when access is opened to other roles with the `codo_mailer_capability` filter, only administrators can read logged message bodies or turn redaction off.
+* Security: the settings screen warns when the encryption key could be recovered from the database, or is too short. The FAQ explains how to set a strong key.
+* Security: the settings screen warns when SMTP sends its password without encryption. Hosts can refuse this with the new `codo_mailer_smtp_allow_plaintext_auth` filter.
+* Fix: attachments too large for an API connection (10 MB for Postmark, 25 MB for the others, or more than PHP's memory allows) now fail cleanly and go to the backup connection instead of stopping PHP. The limit can be changed with the new `codo_mailer_attachment_size_limit` filter.
+
 = 1.0.1 =
 * Security: a password set in wp-config.php is now locked to the SMTP server it last sent through. Changing that server's host, port, encryption or username in the admin screen stops the connection until they are set in wp-config.php too.
 * Security: the alert webhook URL is now stored encrypted and never shown again after saving. Existing URLs are encrypted automatically.
@@ -192,6 +224,9 @@ If you enter a webhook URL (for example a Slack incoming webhook), Codo Mailer p
 * First release: SMTP, Amazon SES, Postmark, Mailgun, Brevo and SendGrid; backup connection; email log with redaction and resend; email and webhook alerts; wp-config.php constants; encrypted secrets.
 
 == Upgrade Notice ==
+
+= 1.0.2 =
+Safer resend, wider redaction of codes and passwords, and warnings for weak encryption keys and unencrypted SMTP logins. Recommended for all sites.
 
 = 1.0.1 =
 Security hardening for stored credentials and message headers. Recommended for all sites.

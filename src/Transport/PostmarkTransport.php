@@ -34,6 +34,15 @@ final class PostmarkTransport extends AbstractHttpTransport {
 	}
 
 	/**
+	 * Postmark accepts at most 10 MB per message.
+	 *
+	 * @return int
+	 */
+	protected function attachment_limit() {
+		return 10 * MB_IN_BYTES;
+	}
+
+	/**
 	 * Perform the provider call.
 	 *
 	 * @param Message $message Message.
