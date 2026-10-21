@@ -21,6 +21,9 @@ class AdminPageTest extends TestCase {
 	/** @var array<string, string> */
 	private $pins = array();
 
+	/** @var array<string, mixed> User meta for the current user. */
+	private $user_meta = array();
+
 	/** @var array<string, mixed> */
 	private $transients = array();
 
@@ -95,6 +98,13 @@ class AdminPageTest extends TestCase {
 					return true;
 				},
 				'get_current_user_id'  => 3,
+				'get_user_meta'        => function ( $user, $key ) {
+					return isset( $this->user_meta[ $key ] ) ? $this->user_meta[ $key ] : '';
+				},
+				'update_user_meta'     => function ( $user, $key, $value ) {
+					$this->user_meta[ $key ] = $value;
+					return true;
+				},
 				'wp_get_current_user'  => static function () {
 					return (object) array( 'user_email' => 'admin@example.com' );
 				},
@@ -119,7 +129,11 @@ class AdminPageTest extends TestCase {
 		$this->settings   = new Settings(
 			new Crypto( 'k' ),
 			function ( $name ) {
-				return isset( $this->constants[ $name ] ) ? $this->constants[ $name ] : null;
+				if ( array_key_exists( $name, $this->constants ) ) {
+					return $this->constants[ $name ];
+				}
+				// Well-configured salts unless a test says otherwise (null = undefined).
+				return in_array( $name, Crypto::SALT_CONSTANTS, true ) ? 'salt-' . $name . '-0123456789abcdef' : null;
 			}
 		);
 	}
@@ -155,7 +169,7 @@ class AdminPageTest extends TestCase {
 		$page = $this->page();
 		$page->register();
 
-		foreach ( array( 'admin_init', 'admin_menu', 'admin_enqueue_scripts', 'admin_post_codo_mailer_save', 'admin_post_codo_mailer_test', 'admin_post_codo_mailer_resend', 'admin_post_codo_mailer_clear_log' ) as $hook ) {
+		foreach ( array( 'admin_init', 'admin_menu', 'admin_enqueue_scripts', 'admin_post_codo_mailer_save', 'admin_post_codo_mailer_test', 'admin_post_codo_mailer_resend', 'admin_post_codo_mailer_clear_log', 'admin_post_codo_mailer_dismiss_key_notice' ) as $hook ) {
 			$this->assertNotFalse( has_action( $hook ), $hook );
 		}
 		$this->assertNotFalse( has_filter( 'plugin_action_links_codo-mailer/codo-mailer.php' ) );
@@ -363,6 +377,52 @@ class AdminPageTest extends TestCase {
 		$html = $this->render();
 
 		$this->assertStringContainsString( '<div class="notice notice-error inline"><p>The password for this connection is set in wp-config.php', $html );
+	}
+
+	public function test_key_notice_when_salts_live_in_the_database() {
+		$this->constants = array( 'SECURE_AUTH_SALT' => 'put your unique phrase here' );
+		$html            = $this->render();
+		$this->assertStringContainsString( '<div class="notice notice-warning inline"><p>Some of WordPress&#039;s security keys and salts are not set in wp-config.php', $html );
+		$this->assertStringContainsString( 'name="action" value="codo_mailer_dismiss_key_notice"', $html );
+		$this->assertStringContainsString( 'name="problem" value="database_salts"', $html );
+
+		$this->constants = array( 'CODO_MAILER_ENCRYPTION_KEY' => str_repeat( 'k', 44 ) );
+		$this->assertStringNotContainsString( 'codo_mailer_dismiss_key_notice', $this->render(), 'a strong key makes the salts irrelevant' );
+
+		$this->constants = array();
+		$this->assertStringNotContainsString( 'codo_mailer_dismiss_key_notice', $this->render(), 'all salts set' );
+	}
+
+	public function test_key_notice_for_a_short_key() {
+		$this->constants = array( 'CODO_MAILER_ENCRYPTION_KEY' => 'hunter2' );
+		$html            = $this->render();
+		$this->assertStringContainsString( 'CODO_MAILER_ENCRYPTION_KEY is shorter than 32 characters', $html );
+		$this->assertStringContainsString( 'name="problem" value="short_key"', $html );
+	}
+
+	public function test_dismissing_the_key_notice_is_per_problem() {
+		$this->constants = array( 'AUTH_KEY' => null );
+		$_POST           = array( 'problem' => 'database_salts' );
+
+		$this->page()->handle_dismiss_key_notice();
+		$this->assertSame( array( 'codo_mailer_dismiss_key_notice' ), $this->nonces );
+		$this->assertSame( 'database_salts', $this->user_meta[ AdminPage::KEY_NOTICE_META ] );
+		$this->assertStringContainsString( 'tab=settings', $this->redirected_to );
+		$this->assertSame( 1, $this->terminated );
+		$this->assertStringNotContainsString( 'codo_mailer_dismiss_key_notice', $this->render() );
+
+		$this->constants = array( 'CODO_MAILER_ENCRYPTION_KEY' => 'short' );
+		$this->assertStringContainsString( 'value="short_key"', $this->render(), 'a different problem shows again' );
+
+		$_POST = array( 'problem' => 'anything-else' );
+		$this->page()->handle_dismiss_key_notice();
+		$this->assertSame( 'database_salts', $this->user_meta[ AdminPage::KEY_NOTICE_META ], 'unknown values are ignored' );
+	}
+
+	public function test_dismissing_the_key_notice_requires_the_capability() {
+		$this->can = false;
+		$this->expectExceptionMessage( 'wp_die' );
+		$this->page()->handle_dismiss_key_notice();
 	}
 
 	public function test_constant_values_are_read_only() {

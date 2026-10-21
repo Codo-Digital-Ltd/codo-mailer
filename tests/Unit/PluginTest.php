@@ -102,6 +102,7 @@ class PluginTest extends TestCase {
 		Functions\expect( 'delete_option' )->once()->with( Settings::OPTION );
 		Functions\expect( 'delete_option' )->once()->with( Settings::PINS_OPTION );
 		Functions\expect( 'delete_transient' )->once()->with( AlertNotifier::LOCK_TRANSIENT );
+		Functions\expect( 'delete_metadata' )->once()->with( 'user', 0, AdminPage::KEY_NOTICE_META, '', true );
 		Functions\expect( 'wp_clear_scheduled_hook' )->once()->with( Plugin::CRON_HOOK );
 
 		Plugin::uninstall();

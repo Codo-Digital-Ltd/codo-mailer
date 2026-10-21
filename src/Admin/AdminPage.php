@@ -10,6 +10,7 @@ namespace CodoDigital\Mailer\Admin;
 use CodoDigital\Mailer\Log\LogRepository;
 use CodoDigital\Mailer\Mail\Dispatcher;
 use CodoDigital\Mailer\Mail\InvalidMessageException;
+use CodoDigital\Mailer\Security\Crypto;
 use CodoDigital\Mailer\Settings\Settings;
 
 defined( 'ABSPATH' ) || exit;
@@ -24,6 +25,11 @@ class AdminPage {
 
 	const SLUG     = 'codo-mailer';
 	const PER_PAGE = 25;
+
+	/**
+	 * User meta recording which encryption key notice the user dismissed.
+	 */
+	const KEY_NOTICE_META = 'codo_mailer_key_notice_dismissed';
 
 	/**
 	 * Settings.
@@ -91,6 +97,7 @@ class AdminPage {
 		add_action( 'admin_post_codo_mailer_test', array( $this, 'handle_test' ) );
 		add_action( 'admin_post_codo_mailer_resend', array( $this, 'handle_resend' ) );
 		add_action( 'admin_post_codo_mailer_clear_log', array( $this, 'handle_clear_log' ) );
+		add_action( 'admin_post_codo_mailer_dismiss_key_notice', array( $this, 'handle_dismiss_key_notice' ) );
 		add_filter( 'plugin_action_links_' . plugin_basename( CODO_MAILER_FILE ), array( $this, 'action_links' ) );
 	}
 
@@ -261,6 +268,8 @@ class AdminPage {
 	 * @return void
 	 */
 	private function render_settings_tab() {
+		$this->render_key_notice();
+
 		echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';
 		echo '<input type="hidden" name="action" value="codo_mailer_save">';
 		wp_nonce_field( 'codo_mailer_save' );
@@ -288,6 +297,38 @@ class AdminPage {
 
 		submit_button( __( 'Save settings', 'codo-mailer' ) );
 		echo '</form>';
+	}
+
+	/**
+	 * Warn when stored secrets would be readable from a database dump alone.
+	 *
+	 * Dismissal is per user and per problem, so a different problem (or the
+	 * same one returning after a fix) shows again.
+	 *
+	 * @return void
+	 */
+	private function render_key_notice() {
+		$problem = $this->settings->encryption_key_problem();
+		if ( null === $problem || get_user_meta( get_current_user_id(), self::KEY_NOTICE_META, true ) === $problem ) {
+			return;
+		}
+
+		if ( 'short_key' === $problem ) {
+			$text = sprintf(
+				/* translators: %d: minimum number of characters. */
+				__( 'CODO_MAILER_ENCRYPTION_KEY is shorter than %d characters, so the API keys and passwords saved here are only as safe as a short passphrase. Replace it with a long random value.', 'codo-mailer' ),
+				Crypto::MIN_KEY_LENGTH
+			);
+		} else {
+			$text = __( 'Some of WordPress\'s security keys and salts are not set in wp-config.php, so WordPress stores them in the database. Anyone with a database backup could then decrypt the API keys and passwords saved here. Define CODO_MAILER_ENCRYPTION_KEY in wp-config.php, then re-enter your saved secrets.', 'codo-mailer' );
+		}
+
+		echo '<div class="notice notice-warning inline"><p>' . esc_html( $text ) . '</p>';
+		echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '"><p>';
+		echo '<input type="hidden" name="action" value="codo_mailer_dismiss_key_notice">';
+		printf( '<input type="hidden" name="problem" value="%s">', esc_attr( $problem ) );
+		wp_nonce_field( 'codo_mailer_dismiss_key_notice' );
+		echo '<button type="submit" class="button-link">' . esc_html__( 'Dismiss', 'codo-mailer' ) . '</button></p></form></div>';
 	}
 
 	/**
@@ -737,6 +778,21 @@ class AdminPage {
 			return;
 		}
 		$this->redirect( 'log', 'error', $result, array( 'entry' => $id ) );
+	}
+
+	/**
+	 * Hide the encryption key notice for the current user.
+	 *
+	 * @return void
+	 */
+	public function handle_dismiss_key_notice() {
+		$this->guard( 'codo_mailer_dismiss_key_notice' );
+		$problem = isset( $_POST['problem'] ) ? sanitize_key( wp_unslash( $_POST['problem'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verified in guard().
+		if ( in_array( $problem, array( 'database_salts', 'short_key' ), true ) ) {
+			update_user_meta( get_current_user_id(), self::KEY_NOTICE_META, $problem );
+		}
+		wp_safe_redirect( $this->url( 'settings' ) );
+		call_user_func( $this->terminate );
 	}
 
 	/**
