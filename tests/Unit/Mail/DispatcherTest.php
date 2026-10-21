@@ -316,6 +316,7 @@ class DispatcherTest extends TestCase {
 		return array_merge(
 			array(
 				'id'           => 5,
+				'created_at'   => gmdate( 'Y-m-d H:i:s' ),
 				'to_addresses' => array( array( 'email' => 'jane@example.org', 'name' => 'Jane' ) ),
 				'subject'      => 'Order #1',
 				'body'         => 'Thanks',
@@ -339,6 +340,7 @@ class DispatcherTest extends TestCase {
 
 	public function test_resend_rebuilds_the_message() {
 		$file      = $this->temp_file( 'data', '.pdf' );
+		touch( $file, time() - 3600 );
 		$transport = $this->transport( 'smtp', SendResult::success(), 0 );
 		$transport->shouldReceive( 'send' )->once()->with(
 			\Mockery::on(
@@ -367,6 +369,67 @@ class DispatcherTest extends TestCase {
 
 		$this->assertTrue( $result );
 		$this->assertSame( 'resend', $this->logged[0]['source'] );
+	}
+
+	public function test_resend_skips_attachments_changed_since_the_email_was_logged() {
+		$logged_at = time() - 3600;
+		$unchanged = $this->temp_file( 'original', '.pdf' );
+		$replaced  = $this->temp_file( 'someone else', '.pdf' );
+		touch( $unchanged, $logged_at - 60 );
+		touch( $replaced, $logged_at + 60 );
+
+		$entry = $this->entry(
+			array(
+				'created_at'  => gmdate( 'Y-m-d H:i:s', $logged_at ),
+				'attachments' => array(
+					array( 'path' => $unchanged, 'name' => 'invoice.pdf' ),
+					array( 'path' => $replaced, 'name' => 'report.pdf' ),
+					array( 'path' => '/gone/b.pdf', 'name' => 'b.pdf' ),
+					array( 'path' => 'phar://' . $unchanged . '/x', 'name' => '' ),
+					array( 'path' => sys_get_temp_dir(), 'name' => 'dir' ),
+					'junk',
+				),
+			)
+		);
+
+		$this->assertSame(
+			array(
+				'keep' => array( array( 'path' => $unchanged, 'name' => 'invoice.pdf' ) ),
+				'skip' => array( 'report.pdf', 'b.pdf', 'x', 'dir' ),
+			),
+			$this->dispatcher()->resend_attachments( $entry )
+		);
+
+		$transport = $this->transport( 'smtp', SendResult::success(), 0 );
+		$transport->shouldReceive( 'send' )->once()->with(
+			\Mockery::on(
+				static function ( $message ) use ( $unchanged ) {
+					return array( array( 'path' => $unchanged, 'name' => 'invoice.pdf' ) ) === $message->attachments();
+				}
+			)
+		)->andReturn( SendResult::success() );
+		$this->assertTrue( $this->dispatcher()->resend( $entry ) );
+	}
+
+	public function test_resend_skips_every_attachment_without_a_log_time() {
+		$file = $this->temp_file( 'data', '.pdf' );
+		touch( $file, time() - 3600 );
+
+		foreach ( array( null, 'not a date' ) as $created_at ) {
+			$entry = $this->entry( array( 'attachments' => array( array( 'path' => $file, 'name' => 'a.pdf' ) ) ) );
+			if ( null === $created_at ) {
+				unset( $entry['created_at'] );
+			} else {
+				$entry['created_at'] = $created_at;
+			}
+			$this->assertSame(
+				array(
+					'keep' => array(),
+					'skip' => array( 'a.pdf' ),
+				),
+				$this->dispatcher()->resend_attachments( $entry )
+			);
+		}
 	}
 
 	public function test_redacted_entries_cannot_be_resent() {

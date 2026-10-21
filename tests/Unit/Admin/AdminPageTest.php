@@ -398,6 +398,12 @@ class AdminPageTest extends TestCase {
 		$this->transients['codo_mailer_notice_3'] = array( 'message' => 'ok' );
 		$this->assertStringContainsString( 'notice-success', $this->render() );
 
+		$this->transients['codo_mailer_notice_3'] = array(
+			'type'    => 'warning',
+			'message' => 'careful',
+		);
+		$this->assertStringContainsString( 'notice-warning', $this->render() );
+
 		$this->transients['codo_mailer_notice_3'] = 'corrupt';
 		$this->assertStringNotContainsString( 'notice-', $this->render() );
 	}
@@ -576,6 +582,7 @@ class AdminPageTest extends TestCase {
 	public function test_handle_resend_paths() {
 		$_POST['entry'] = '12';
 		$this->log->shouldReceive( 'find' )->with( 12 )->andReturn( null, $this->log_row(), $this->log_row() );
+		$this->dispatcher->shouldReceive( 'resend_attachments' )->andReturn( array( 'keep' => array(), 'skip' => array() ) );
 		$this->dispatcher->shouldReceive( 'resend' )->twice()->andReturn( true, 'Resending failed.' );
 
 		$this->page()->handle_resend();
@@ -588,6 +595,23 @@ class AdminPageTest extends TestCase {
 		$this->assertSame( 'Resending failed.', $this->notice()['message'] );
 		$this->assertStringContainsString( 'entry=12', $this->redirected_to );
 		$this->assertSame( array_fill( 0, 3, 'codo_mailer_resend_12' ), $this->nonces, 'nonce is bound to the entry ID' );
+	}
+
+	public function test_handle_resend_warns_about_skipped_attachments() {
+		$_POST['entry'] = '12';
+		$this->log->shouldReceive( 'find' )->with( 12 )->andReturn( $this->log_row() );
+		$this->dispatcher->shouldReceive( 'resend_attachments' )->andReturn(
+			array(
+				'keep' => array(),
+				'skip' => array( 'report.pdf', 'b.pdf' ),
+			)
+		);
+		$this->dispatcher->shouldReceive( 'resend' )->once()->andReturn( true );
+
+		$this->page()->handle_resend();
+		$this->assertSame( 'warning', $this->notice()['type'] );
+		$this->assertStringContainsString( 'without these attachments', $this->notice()['message'] );
+		$this->assertStringEndsWith( ': report.pdf, b.pdf', $this->notice()['message'] );
 	}
 
 	public function test_handle_resend_without_an_id() {
