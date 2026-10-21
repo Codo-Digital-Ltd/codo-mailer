@@ -30,7 +30,7 @@ class AdminPageTest extends TestCase {
 	/** @var int */
 	private $terminated = 0;
 
-	/** @var bool */
+	/** @var bool|string[] True/false for every capability, or the capabilities the user has. */
 	private $can = true;
 
 	/** @var string[] Nonce actions checked. */
@@ -55,8 +55,8 @@ class AdminPageTest extends TestCase {
 
 		Functions\stubs(
 			array(
-				'current_user_can'     => function () {
-					return $this->can;
+				'current_user_can'     => function ( $capability ) {
+					return is_array( $this->can ) ? in_array( $capability, $this->can, true ) : $this->can;
 				},
 				'wp_die'               => static function ( $message ) {
 					throw new \RuntimeException( 'wp_die: ' . $message );
@@ -524,6 +524,81 @@ class AdminPageTest extends TestCase {
 	public function test_handle_save_ignores_non_array_input() {
 		$_POST['codo_mailer'] = 'string';
 		Functions\expect( 'update_option' )->once();
+		$this->page()->handle_save();
+	}
+
+	/**
+	 * Issue #9: a role granted access through codo_mailer_capability.
+	 */
+	private function as_delegated_role() {
+		\Brain\Monkey\Filters\expectApplied( 'codo_mailer_capability' )->andReturn( 'edit_pages' );
+		$this->can = array( 'edit_pages' );
+	}
+
+	public function test_delegated_role_cannot_view_message_bodies() {
+		$this->as_delegated_role();
+		$_GET = array( 'tab' => 'log', 'entry' => '12' );
+		$this->log->shouldReceive( 'find' )->with( 12 )->andReturn( $this->log_row() );
+
+		$html = $this->render();
+
+		$this->assertStringNotContainsString( 'Body&lt;/p&gt;', $html );
+		$this->assertStringContainsString( 'Only an administrator can view message bodies', $html );
+		$this->assertStringContainsString( 'cc@example.org', $html, 'the rest of the entry is still shown' );
+		$this->assertFalse( $this->page()->can_view_secrets() );
+	}
+
+	public function test_delegated_role_cannot_change_redaction() {
+		$this->as_delegated_role();
+
+		$html = $this->render();
+		$this->assertMatchesRegularExpression( '~name="codo_mailer\[redact_sensitive\]" value="1" checked="checked" disabled="disabled"~', $html );
+		$this->assertStringContainsString( 'Only an administrator can change this.', $html );
+
+		$_POST['codo_mailer'] = array( 'from_name' => 'Shop' );
+		Functions\expect( 'update_option' )->once()->with(
+			Settings::OPTION,
+			\Mockery::on(
+				static function ( $v ) {
+					return true === $v['redact_sensitive'] && 'Shop' === $v['from_name'];
+				}
+			),
+			false
+		);
+		$this->page()->handle_save();
+	}
+
+	public function test_delegated_role_cannot_turn_redaction_back_on_or_off_either_way() {
+		$this->as_delegated_role();
+		$this->option         = array( 'redact_sensitive' => false );
+		$_POST['codo_mailer'] = array( 'redact_sensitive' => '1' );
+		Functions\expect( 'update_option' )->once()->with(
+			Settings::OPTION,
+			\Mockery::on(
+				static function ( $v ) {
+					return false === $v['redact_sensitive'];
+				}
+			),
+			false
+		);
+		$this->page()->handle_save();
+	}
+
+	public function test_administrators_keep_full_access_when_the_capability_is_lowered() {
+		\Brain\Monkey\Filters\expectApplied( 'codo_mailer_capability' )->andReturn( 'edit_pages' );
+		$this->can = array( 'edit_pages', 'manage_options' );
+
+		$this->assertTrue( $this->page()->can_view_secrets() );
+		$_POST['codo_mailer'] = array();
+		Functions\expect( 'update_option' )->once()->with(
+			Settings::OPTION,
+			\Mockery::on(
+				static function ( $v ) {
+					return false === $v['redact_sensitive'];
+				}
+			),
+			false
+		);
 		$this->page()->handle_save();
 	}
 

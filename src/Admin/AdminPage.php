@@ -104,7 +104,7 @@ class AdminPage {
 	 * @return string
 	 */
 	public function capability() {
-		$default = is_multisite() ? 'manage_network_options' : 'manage_options';
+		$default = $this->admin_capability();
 
 		/**
 		 * Filters the capability required to manage Codo Mailer.
@@ -113,6 +113,30 @@ class AdminPage {
 		 */
 		$capability = apply_filters( 'codo_mailer_capability', $default );
 		return is_string( $capability ) && '' !== $capability ? $capability : $default;
+	}
+
+	/**
+	 * The unfiltered capability: manage_options, or manage_network_options
+	 * on multisite.
+	 *
+	 * @return string
+	 */
+	public function admin_capability() {
+		return is_multisite() ? 'manage_network_options' : 'manage_options';
+	}
+
+	/**
+	 * Whether the current user may read logged message bodies and turn off
+	 * redaction.
+	 *
+	 * Both can expose working password-reset links, so they stay with
+	 * administrators even when codo_mailer_capability opens the rest of the
+	 * screen to a lower role.
+	 *
+	 * @return bool
+	 */
+	public function can_view_secrets() {
+		return current_user_can( $this->admin_capability() );
 	}
 
 	/**
@@ -277,7 +301,14 @@ class AdminPage {
 
 		echo '<h2>' . esc_html__( 'Email log', 'codo-mailer' ) . '</h2><table class="form-table" role="presentation">';
 		$this->checkbox_row( 'log_enabled', __( 'Log emails', 'codo-mailer' ), __( 'Keep a record of sent and failed emails so you can inspect and resend them.', 'codo-mailer' ) );
-		$this->checkbox_row( 'redact_sensitive', __( 'Redact secrets', 'codo-mailer' ), __( 'Strip password-reset and one-time login links from logged emails (recommended).', 'codo-mailer' ) );
+		$this->checkbox_row(
+			'redact_sensitive',
+			__( 'Redact secrets', 'codo-mailer' ),
+			$this->can_view_secrets()
+				? __( 'Strip password-reset and one-time login links from logged emails (recommended).', 'codo-mailer' )
+				: __( 'Strip password-reset and one-time login links from logged emails. Only an administrator can change this.', 'codo-mailer' ),
+			! $this->can_view_secrets()
+		);
 		$this->text_row( 'log_retention_days', __( 'Keep logs for (days)', 'codo-mailer' ), 'number' );
 		echo '</table>';
 
@@ -454,10 +485,11 @@ class AdminPage {
 	 * @param string $key         Setting key.
 	 * @param string $label       Label.
 	 * @param string $description Checkbox text.
+	 * @param bool   $read_only   Show the value but don't allow changes.
 	 * @return void
 	 */
-	private function checkbox_row( $key, $label, $description ) {
-		$locked = $this->settings->is_constant( $key );
+	private function checkbox_row( $key, $label, $description, $read_only = false ) {
+		$locked = $this->settings->is_constant( $key ) || $read_only;
 		printf(
 			'<tr><th scope="row">%1$s</th><td><label><input type="checkbox" name="codo_mailer[%2$s]" value="1"%3$s%4$s> %5$s</label>',
 			esc_html( $label ),
@@ -466,7 +498,7 @@ class AdminPage {
 			disabled( $locked, true, false ),
 			esc_html( $description )
 		);
-		if ( $locked ) {
+		if ( $this->settings->is_constant( $key ) ) {
 			$this->constant_hint();
 		}
 		echo '</td></tr>';
@@ -648,7 +680,11 @@ class AdminPage {
 		}
 
 		echo '<h2>' . esc_html__( 'Body', 'codo-mailer' ) . '</h2>';
-		echo '<pre style="white-space:pre-wrap;max-height:30em;overflow:auto;background:#fff;padding:1em;border:1px solid #c3c4c7">' . esc_html( (string) $entry['body'] ) . '</pre>';
+		if ( $this->can_view_secrets() ) {
+			echo '<pre style="white-space:pre-wrap;max-height:30em;overflow:auto;background:#fff;padding:1em;border:1px solid #c3c4c7">' . esc_html( (string) $entry['body'] ) . '</pre>';
+		} else {
+			echo '<p class="description">' . esc_html__( 'Only an administrator can view message bodies, because they can contain password-reset links.', 'codo-mailer' ) . '</p>';
+		}
 
 		if ( ! $entry['redacted'] ) {
 			echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';
@@ -669,6 +705,10 @@ class AdminPage {
 		$this->guard( 'codo_mailer_save' );
 		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized, WordPress.Security.NonceVerification.Missing -- nonce checked in guard(); sanitised field by field in Settings::sanitize().
 		$input = isset( $_POST['codo_mailer'] ) && is_array( $_POST['codo_mailer'] ) ? wp_unslash( $_POST['codo_mailer'] ) : array();
+		if ( ! $this->can_view_secrets() ) {
+			// A lower role granted by codo_mailer_capability can't change redaction.
+			$input['redact_sensitive'] = (bool) $this->settings->get( 'redact_sensitive' );
+		}
 		$this->settings->save( $input );
 		$this->redirect( 'settings', 'success', __( 'Settings saved.', 'codo-mailer' ) );
 	}

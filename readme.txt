@@ -78,7 +78,7 @@ To use your own encryption key instead of the site salts, define `CODO_MAILER_EN
 * `codo_mailer_redaction_patterns` filter: add regular expressions for other secret links (e.g. magic-login tokens).
 * `codo_mailer_transport` filter: provide a transport for a custom connection type.
 * `codo_mailer_alert_interval` filter: change the alert throttle (seconds).
-* `codo_mailer_capability` filter: change who can manage the plugin.
+* `codo_mailer_capability` filter: change who can manage the plugin. Read "Can I let editors or shop managers manage email?" in the FAQ first.
 * `codo_mailer_sent` action: fires after delivery with the message, connection and provider result.
 
 Source, issues and tests: [github.com/Codo-Digital-Ltd/codo-mailer](https://github.com/Codo-Digital-Ltd/codo-mailer).
@@ -125,6 +125,12 @@ Over SMTP, Amazon SES and Mailgun, yes. Postmark, Brevo and SendGrid require at 
 = Will a failure slow my site down? =
 
 Each provider call times out after 15 seconds. Failure alerts are sent at the end of the request, after the page has been delivered where the server supports it, so visitors don't wait for them.
+
+= Can I let editors or shop managers manage email? =
+
+Yes, with the `codo_mailer_capability` filter, for example `add_filter( 'codo_mailer_capability', fn() => 'edit_pages' );`. The default is `manage_options`, or `manage_network_options` on multisite. Only give it to people you would trust with every account on the site. Anyone who can manage Codo Mailer can change the connection, so they can route all of the site's email, including password resets, through a server they control.
+
+Even with the capability lowered, two things stay with administrators: reading message bodies in the email log, and turning **Redact secrets** off. Bodies can contain working password-reset links, and redaction is what keeps them out of the log. Other users see the log's recipients, subjects and errors, and can still resend emails.
 
 == External services ==
 
