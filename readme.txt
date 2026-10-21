@@ -105,6 +105,16 @@ Yes. Codo Mailer connects your site to a provider; it doesn't send email itself.
 
 Yes. Anything that sends through `wp_mail()` goes through Codo Mailer.
 
+= Why doesn't my DKIM, Bcc archive or other phpmailer_init plugin work with Postmark, Brevo or SendGrid? =
+
+Some plugins change outgoing email by hooking WordPress's `phpmailer_init` action, which hands them the PHPMailer object just before sending: to add a DKIM signature, Bcc archive copies, embedded images or extra headers. Codo Mailer fires it for SMTP, Amazon SES and Mailgun, which send a full MIME message built with PHPMailer. Postmark, Brevo and SendGrid take the email as JSON through their APIs, so there is no PHPMailer object and `phpmailer_init` does not run for them; those plugins' changes are skipped. The settings screen points this out when you pick one of these providers, and warns if a plugin on your site uses the hook.
+
+What to do instead:
+
+* DKIM: these providers sign email themselves once you verify your domain with them, so a DKIM plugin isn't needed.
+* Bcc copies, extra headers and other changes: developers can use the `codo_mailer_message` filter (see "For developers"), which runs for every provider.
+* Otherwise, choose SMTP, Amazon SES or Mailgun, where `phpmailer_init` keeps working.
+
 = Why can't I resend a password-reset email? =
 
 The reset link was redacted before logging, so the logged copy no longer contains it. Ask the user to request a new reset, which is also safer.
@@ -120,16 +130,6 @@ No. It talks only to the email provider (and alert webhook) you configure.
 = Is it multisite compatible? =
 
 Yes. Each site has its own settings and log, managed by super admins only. Constants in `wp-config.php` apply to every site in the network.
-
-= Why doesn't my DKIM, Bcc archive or other phpmailer_init plugin work with Postmark, Brevo or SendGrid? =
-
-Some plugins change outgoing email by hooking WordPress's `phpmailer_init` action, which hands them the PHPMailer object just before sending: to add a DKIM signature, Bcc archive copies, embedded images or extra headers. Codo Mailer fires it for SMTP, Amazon SES and Mailgun, which send a full MIME message built with PHPMailer. Postmark, Brevo and SendGrid take the email as JSON through their APIs, so there is no PHPMailer object and `phpmailer_init` does not run for them; those plugins' changes are skipped. The settings screen points this out when you pick one of these providers, and warns if a plugin on your site uses the hook.
-
-What to do instead:
-
-* DKIM: these providers sign email themselves once you verify your domain with them, so a DKIM plugin isn't needed.
-* Bcc copies, extra headers and other changes: developers can use the `codo_mailer_message` filter (see "For developers"), which runs for every provider.
-* Otherwise, choose SMTP, Amazon SES or Mailgun, where `phpmailer_init` keeps working.
 
 = Can I send an email with only Bcc recipients? =
 
