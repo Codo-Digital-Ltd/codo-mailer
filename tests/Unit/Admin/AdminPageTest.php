@@ -365,6 +365,26 @@ class AdminPageTest extends TestCase {
 		$this->assertStringContainsString( '<div class="notice notice-error inline"><p>The password for this connection is set in wp-config.php', $html );
 	}
 
+	public function test_plaintext_smtp_auth_is_warned_about() {
+		$this->option = array(
+			'primary' => array(
+				'type'       => 'smtp',
+				'host'       => 'mail.example.com',
+				'encryption' => 'none',
+				'auth'       => true,
+				'username'   => 'u',
+			),
+		);
+		$this->assertStringContainsString( '<div class="notice notice-warning inline"><p>This connection logs in to mail.example.com without encryption', $this->render() );
+
+		$this->option['primary']['host'] = 'localhost';
+		$this->assertStringNotContainsString( 'without encryption', $this->render() );
+
+		$this->option['primary']['host']       = 'mail.example.com';
+		$this->option['primary']['encryption'] = 'tls';
+		$this->assertStringNotContainsString( 'without encryption', $this->render() );
+	}
+
 	public function test_constant_values_are_read_only() {
 		$this->constants = array(
 			'CODO_MAILER_FROM_EMAIL'       => 'host@example.com',

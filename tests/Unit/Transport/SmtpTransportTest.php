@@ -70,6 +70,42 @@ class SmtpTransportTest extends TestCase {
 		$this->assertSame( '', $this->mailer->Username );
 	}
 
+	public function test_plaintext_auth_detection() {
+		$this->assertTrue( SmtpTransport::is_plaintext_auth( $this->config( array( 'encryption' => 'none' ) ) ) );
+		$this->assertTrue( SmtpTransport::is_plaintext_auth( $this->config( array( 'encryption' => 'none', 'host' => ' Relay.Internal ' ) ) ) );
+
+		$this->assertFalse( SmtpTransport::is_plaintext_auth( $this->config() ), 'tls' );
+		$this->assertFalse( SmtpTransport::is_plaintext_auth( $this->config( array( 'encryption' => 'ssl' ) ) ), 'ssl' );
+		$this->assertFalse( SmtpTransport::is_plaintext_auth( $this->config( array( 'encryption' => 'none', 'auth' => false ) ) ), 'no auth' );
+		foreach ( array( 'localhost', 'LOCALHOST', '127.0.0.1', '127.0.1.1', '::1', '[::1]', '' ) as $host ) {
+			$this->assertFalse( SmtpTransport::is_plaintext_auth( $this->config( array( 'encryption' => 'none', 'host' => $host ) ) ), $host );
+		}
+		$config = $this->config( array( 'encryption' => 'none' ) );
+		unset( $config['encryption'] );
+		$this->assertFalse( SmtpTransport::is_plaintext_auth( $config ), 'missing encryption means tls' );
+	}
+
+	public function test_plaintext_auth_is_allowed_by_default() {
+		$result = $this->transport( $this->config( array( 'encryption' => 'none' ) ) )->send( $this->message() );
+		$this->assertTrue( $result->is_success(), $result->error() );
+		$this->assertSame( 'pass', $this->mailer->Password );
+	}
+
+	public function test_plaintext_auth_can_be_refused_by_filter() {
+		\Brain\Monkey\Filters\expectApplied( 'codo_mailer_smtp_allow_plaintext_auth' )->once()->with( true, 'smtp.example.com' )->andReturn( false );
+
+		$result = $this->transport( $this->config( array( 'encryption' => 'none' ) ) )->send( $this->message() );
+
+		$this->assertFalse( $result->is_success() );
+		$this->assertStringStartsWith( 'SMTP is set to authenticate without encryption', $result->error() );
+		$this->assertSame( 0, $this->mailer->sends, 'nothing was sent' );
+	}
+
+	public function test_filter_is_not_consulted_for_encrypted_connections() {
+		\Brain\Monkey\Filters\expectApplied( 'codo_mailer_smtp_allow_plaintext_auth' )->never();
+		$this->assertTrue( $this->transport( $this->config() )->send( $this->message() )->is_success() );
+	}
+
 	public function test_missing_encryption_defaults_to_tls() {
 		$config = $this->config();
 		unset( $config['encryption'] );

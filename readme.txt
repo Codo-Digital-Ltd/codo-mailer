@@ -78,6 +78,7 @@ To use your own encryption key instead of the site salts, define `CODO_MAILER_EN
 * `codo_mailer_redaction_patterns` filter: add regular expressions for other secret links (e.g. magic-login tokens).
 * `codo_mailer_transport` filter: provide a transport for a custom connection type.
 * `codo_mailer_alert_interval` filter: change the alert throttle (seconds).
+* `codo_mailer_smtp_allow_plaintext_auth` filter: return false to refuse SMTP logins over an unencrypted connection (other than to localhost).
 * `codo_mailer_capability` filter: change who can manage the plugin.
 * `codo_mailer_sent` action: fires after delivery with the message, connection and provider result.
 
@@ -125,6 +126,10 @@ Over SMTP, Amazon SES and Mailgun, yes. Postmark, Brevo and SendGrid require at 
 = Will a failure slow my site down? =
 
 Each provider call times out after 15 seconds. Failure alerts are sent at the end of the request, after the page has been delivered where the server supports it, so visitors don't wait for them.
+
+= Why does the settings screen warn about SMTP without encryption? =
+
+With Encryption set to None and Authenticate on, your SMTP username and password are sent to the server in plain text, where anyone on the network path can read them. Codo Mailer also turns off automatic STARTTLS in this mode, so this happens even if the server supports encryption. Choose TLS or SSL unless the server is a trusted relay on your own network. Connections to localhost are not warned about. Hosts can refuse plaintext logins outright with the `codo_mailer_smtp_allow_plaintext_auth` filter.
 
 == External services ==
 
