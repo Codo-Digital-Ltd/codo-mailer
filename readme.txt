@@ -78,6 +78,7 @@ To use your own encryption key instead of the site salts, define `CODO_MAILER_EN
 * `codo_mailer_redaction_patterns` filter: add regular expressions for other secrets (e.g. magic-login tokens). They apply to the subject as well as the body.
 * `codo_mailer_transport` filter: provide a transport for a custom connection type.
 * `codo_mailer_alert_interval` filter: change the alert throttle (seconds).
+* `codo_mailer_attachment_size_limit` filter: change the largest total attachment size an API connection will send (bytes; 10 MB for Postmark, 25 MB otherwise, 0 for no cap). Larger emails fail on that connection and go to the backup.
 * `codo_mailer_capability` filter: change who can manage the plugin.
 * `codo_mailer_sent` action: fires after delivery with the message, connection and provider result.
 

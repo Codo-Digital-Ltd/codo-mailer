@@ -75,6 +75,17 @@ class PostmarkTransportTest extends HttpTransportTestCase {
 		$this->assertSame( 'Attachment "missing.pdf" could not be read.', $result->error() );
 	}
 
+	public function test_attachments_over_the_postmark_limit_fail_before_any_file_is_read() {
+		$result = $this->transport( $this->unused_http() )->send( $this->message_with_attachments_of( array( 6 * MB_IN_BYTES, 5 * MB_IN_BYTES ) ) );
+		$this->assertSame( 'Attachments total 11 MB, over the 10 MB limit for Postmark connections.', $result->error() );
+	}
+
+	public function test_attachment_limit_is_filterable() {
+		\Brain\Monkey\Filters\expectApplied( 'codo_mailer_attachment_size_limit' )->once()->with( 10 * MB_IN_BYTES, 'postmark' )->andReturn( 1024 );
+		$result = $this->transport( $this->unused_http() )->send( $this->message_with_attachments_of( array( 2048 ) ) );
+		$this->assertSame( 'Attachments total 2 KB, over the 1 KB limit for Postmark connections.', $result->error() );
+	}
+
 	public function test_bcc_only_messages_are_rejected_clearly() {
 		$message = $this->message( array( 'to' => array(), 'bcc' => array( array( 'email' => 'b@example.org', 'name' => '' ) ) ) );
 		$result  = $this->transport( $this->unused_http() )->send( $message );
