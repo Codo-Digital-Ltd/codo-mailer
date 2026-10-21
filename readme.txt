@@ -80,7 +80,7 @@ To use your own encryption key instead of the site salts, define `CODO_MAILER_EN
 * `codo_mailer_alert_interval` filter: change the alert throttle (seconds).
 * `codo_mailer_attachment_size_limit` filter: change the largest total attachment size an API connection will send (bytes; 10 MB for Postmark, 25 MB otherwise, 0 for no cap). Larger emails fail on that connection and go to the backup.
 * `codo_mailer_smtp_allow_plaintext_auth` filter: return false to refuse SMTP logins over an unencrypted connection (other than to localhost).
-* `codo_mailer_capability` filter: change who can manage the plugin.
+* `codo_mailer_capability` filter: change who can manage the plugin. Read "Can I let editors or shop managers manage email?" in the FAQ first.
 * `codo_mailer_sent` action: fires after delivery with the message, connection and provider result.
 
 Source, issues and tests: [github.com/Codo-Digital-Ltd/codo-mailer](https://github.com/Codo-Digital-Ltd/codo-mailer).
@@ -143,6 +143,12 @@ To fix it, add a dedicated key of at least 32 random bytes to wp-config.php. Gen
 Use a random value, not a memorable passphrase: the key is hashed without key stretching, so a short phrase is a weak key. Keys shorter than 32 characters are warned about.
 
 Setting or changing the key makes existing saved secrets unreadable. To rotate it: set the new key, then re-enter each API key and password on the settings screen (secrets defined as constants in wp-config.php are unaffected). Keep the key out of version control and out of database backups, which is the point of keeping it in wp-config.php.
+
+= Can I let editors or shop managers manage email? =
+
+Yes, with the `codo_mailer_capability` filter, for example `add_filter( 'codo_mailer_capability', fn() => 'edit_pages' );`. The default is `manage_options`, or `manage_network_options` on multisite. Only give it to people you would trust with every account on the site. Anyone who can manage Codo Mailer can change the connection, so they can route all of the site's email, including password resets, through a server they control.
+
+Even with the capability lowered, two things stay with administrators: reading message bodies in the email log, and turning **Redact secrets** off. Bodies can contain working password-reset links, and redaction is what keeps them out of the log. Other users see the log's recipients, subjects and errors, and can still resend emails.
 
 == External services ==
 
