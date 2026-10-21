@@ -34,7 +34,7 @@ API providers are used over HTTPS, so blocked SMTP ports on your host don't matt
 * **Failure alerts** by email and/or webhook (a Slack incoming webhook works as-is), at most one per hour.
 * **Send a test email** from the settings screen.
 * **From address control**, with an option to override other plugins' senders.
-* Works with WooCommerce, contact form plugins and anything else that uses `wp_mail()`. Core hooks such as `wp_mail_from`, `wp_mail_content_type`, `wp_mail_succeeded` and `wp_mail_failed` keep working. `phpmailer_init` (used by DKIM-signing plugins) runs for SMTP, Amazon SES and Mailgun, which send full MIME; Postmark, Brevo and SendGrid build the message on their side.
+* Works with WooCommerce, contact form plugins and anything else that uses `wp_mail()`. Core hooks such as `wp_mail_from`, `wp_mail_content_type`, `wp_mail_succeeded` and `wp_mail_failed` keep working. `phpmailer_init` (used by DKIM-signing plugins) runs for SMTP, Amazon SES and Mailgun, which send full MIME; Postmark, Brevo and SendGrid build the message on their side, so it does not run for them (see the FAQ).
 
 = Secure by default =
 
@@ -81,6 +81,7 @@ To use your own encryption key instead of the site salts, define `CODO_MAILER_EN
 * `codo_mailer_attachment_size_limit` filter: change the largest total attachment size an API connection will send (bytes; 10 MB for Postmark, 25 MB otherwise, 0 for no cap). Larger emails fail on that connection and go to the backup.
 * `codo_mailer_smtp_allow_plaintext_auth` filter: return false to refuse SMTP logins over an unencrypted connection (other than to localhost).
 * `codo_mailer_capability` filter: change who can manage the plugin. Read "Can I let editors or shop managers manage email?" in the FAQ first.
+* `codo_mailer_message` filter: change an email before it is sent, for every provider. It receives the `CodoDigital\Mailer\Mail\Message` and the source (`wp_mail`, `test` or `resend`) and must return a Message, e.g. `$message->with( array( 'bcc' => array( array( 'email' => 'archive@example.com', 'name' => '' ) ) ) )`. It runs once per email, before the primary connection; the backup, the log and `wp_mail_succeeded` see the result. Use it instead of `phpmailer_init`, which Postmark, Brevo and SendGrid never fire.
 * `codo_mailer_sent` action: fires after delivery with the message, connection and provider result.
 
 Source, issues and tests: [github.com/Codo-Digital-Ltd/codo-mailer](https://github.com/Codo-Digital-Ltd/codo-mailer).
@@ -119,6 +120,16 @@ No. It talks only to the email provider (and alert webhook) you configure.
 = Is it multisite compatible? =
 
 Yes. Each site has its own settings and log, managed by super admins only. Constants in `wp-config.php` apply to every site in the network.
+
+= Why doesn't my DKIM, Bcc archive or other phpmailer_init plugin work with Postmark, Brevo or SendGrid? =
+
+Some plugins change outgoing email by hooking WordPress's `phpmailer_init` action, which hands them the PHPMailer object just before sending: to add a DKIM signature, Bcc archive copies, embedded images or extra headers. Codo Mailer fires it for SMTP, Amazon SES and Mailgun, which send a full MIME message built with PHPMailer. Postmark, Brevo and SendGrid take the email as JSON through their APIs, so there is no PHPMailer object and `phpmailer_init` does not run for them; those plugins' changes are skipped. The settings screen points this out when you pick one of these providers, and warns if a plugin on your site uses the hook.
+
+What to do instead:
+
+* DKIM: these providers sign email themselves once you verify your domain with them, so a DKIM plugin isn't needed.
+* Bcc copies, extra headers and other changes: developers can use the `codo_mailer_message` filter (see "For developers"), which runs for every provider.
+* Otherwise, choose SMTP, Amazon SES or Mailgun, where `phpmailer_init` keeps working.
 
 = Can I send an email with only Bcc recipients? =
 

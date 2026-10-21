@@ -335,6 +335,32 @@ class AdminPageTest extends TestCase {
 		);
 	}
 
+	public function test_json_api_providers_explain_that_phpmailer_init_does_not_run() {
+		$html = $this->render();
+
+		foreach ( array( 'Postmark', 'Brevo', 'SendGrid' ) as $label ) {
+			$this->assertStringContainsString( '<p class="description">' . $label . ' sends email through its API without PHPMailer, so plugins that use the phpmailer_init hook', $html );
+		}
+		foreach ( array( 'SMTP', 'Amazon SES', 'Mailgun' ) as $label ) {
+			$this->assertStringNotContainsString( $label . ' sends email through its API', $html );
+		}
+		$this->assertStringContainsString( 'codo_mailer_message filter', $html );
+		$this->assertStringNotContainsString( 'Another plugin on this site', $html );
+
+		// The note sits inside each provider's own table, so the type switcher shows it with that provider.
+		$this->assertMatchesRegularExpression( '#data-codo-slot="primary" data-codo-type="brevo">(?:(?!</table>).)*Brevo sends email through its API#s', $html );
+	}
+
+	public function test_json_api_providers_warn_when_a_plugin_hooks_phpmailer_init() {
+		add_action( 'phpmailer_init', 'dkim_sign' );
+
+		$html = $this->render();
+
+		$this->assertStringContainsString( '<div class="notice notice-warning inline"><p>Another plugin on this site changes outgoing email with the phpmailer_init hook', $html );
+		$this->assertStringContainsString( 'Postmark sends email through its API without PHPMailer, so those changes will not be applied.', $html );
+		$this->assertSame( 6, substr_count( $html, 'Another plugin on this site' ), 'three providers, two connections' );
+	}
+
 	public function test_resaving_the_form_keeps_secrets() {
 		$this->submit_provider( 'mailgun', array( 'domain' => 'mg.example.com', 'api_key' => 'key-1' ) );
 		$connection = $this->submit_provider( 'mailgun', array() );

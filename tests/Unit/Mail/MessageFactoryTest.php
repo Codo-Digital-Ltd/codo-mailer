@@ -3,6 +3,7 @@ namespace CodoDigital\Mailer\Tests\Unit\Mail;
 
 use Brain\Monkey\Filters;
 use CodoDigital\Mailer\Mail\InvalidMessageException;
+use CodoDigital\Mailer\Mail\Message;
 use CodoDigital\Mailer\Mail\MessageFactory;
 use CodoDigital\Mailer\Tests\TestCase;
 
@@ -229,5 +230,143 @@ class MessageFactoryTest extends TestCase {
 	public function test_default_from_keeps_non_www_hosts() {
 		\Brain\Monkey\Functions\when( 'network_home_url' )->justReturn( 'https://shop.example.co.uk/' );
 		$this->assertSame( 'wordpress@shop.example.co.uk', ( new MessageFactory() )->default_from_email() );
+	}
+
+	public function test_normalize_keeps_a_valid_message_as_it_is() {
+		$message = $this->message(
+			array(
+				'cc'           => array( array( 'email' => 'cc@example.org', 'name' => 'Cc' ) ),
+				'bcc'          => array( array( 'email' => 'archive@example.com', 'name' => '' ) ),
+				'reply_to'     => array( array( 'email' => 'help@example.com', 'name' => 'Help' ) ),
+				'content_type' => 'text/html',
+				'charset'      => 'ISO-8859-1',
+				'headers'      => array( 'X-Order' => '42' ),
+				'attachments'  => array( array( 'path' => '/tmp/a.pdf', 'name' => 'Invoice.pdf' ) ),
+			)
+		);
+
+		$this->assertSame( $message->to_array(), ( new MessageFactory() )->normalize( $message )->to_array() );
+	}
+
+	public function test_normalize_drops_invalid_addresses_and_line_breaks() {
+		$message = $this->message(
+			array(
+				'from_name' => "Shop\r\nBcc: evil@example.net",
+				'to'        => array(
+					array( 'email' => 'jane@example.org', 'name' => "Jane\nBcc: evil@example.net" ),
+					array( 'email' => 'not-an-address', 'name' => '' ),
+					'jane@example.org',
+					array( 'name' => 'No email' ),
+				),
+				'cc'        => 'cc@example.org',
+				'bcc'       => array( array( 'email' => 'b@example.org', 'name' => array( 'x' ) ) ),
+				'subject'   => "Hi\r\nBcc: evil@example.net",
+			)
+		);
+
+		$clean = ( new MessageFactory() )->normalize( $message );
+
+		$this->assertSame( 'ShopBcc: evil@example.net', $clean->from_name() );
+		$this->assertSame( array( array( 'email' => 'jane@example.org', 'name' => 'JaneBcc: evil@example.net' ) ), $clean->to() );
+		$this->assertSame( array(), $clean->cc() );
+		$this->assertSame( array( array( 'email' => 'b@example.org', 'name' => '' ) ), $clean->bcc() );
+		$this->assertSame( 'Hi  Bcc: evil@example.net', $clean->subject() );
+	}
+
+	public function test_normalize_checks_custom_headers_like_wp_mail() {
+		$message = $this->message(
+			array(
+				'headers' => array(
+					'X-Ok'        => 'yes',
+					'X-Injected'  => "a\r\nBcc: evil@example.net",
+					'Bad Name'    => 'x',
+					'X-Empty'     => '',
+					'X-Array'     => array( 'x' ),
+					'Cc'          => 'sneaky@example.net',
+					'Content-Type' => 'text/html',
+				),
+			)
+		);
+
+		$clean = ( new MessageFactory() )->normalize( $message );
+
+		$this->assertSame(
+			array(
+				'X-Ok'       => 'yes',
+				'X-Injected' => 'aBcc: evil@example.net',
+			),
+			$clean->headers()
+		);
+		$this->assertSame( array(), $clean->cc(), 'address headers are not taken from custom headers' );
+		$this->assertSame( 'text/plain', $clean->content_type() );
+	}
+
+	public function test_normalize_falls_back_on_an_invalid_content_type_or_charset() {
+		$clean = ( new MessageFactory() )->normalize(
+			$this->message(
+				array(
+					'content_type' => "text/html\r\nBcc: x@example.net",
+					'charset'      => 'utf 8; evil',
+				)
+			)
+		);
+
+		$this->assertSame( 'text/plain', $clean->content_type() );
+		$this->assertSame( 'UTF-8', $clean->charset() );
+
+		$multipart = ( new MessageFactory() )->normalize( $this->message( array( 'content_type' => 'multipart/alternative' ) ) );
+		$this->assertSame( 'text/plain', $multipart->content_type() );
+	}
+
+	public function test_normalize_drops_stream_wrapper_attachments() {
+		$clean = ( new MessageFactory() )->normalize(
+			$this->message(
+				array(
+					'attachments' => array(
+						array( 'path' => ' /tmp/a.pdf ', 'name' => '' ),
+						array( 'path' => '/tmp/b.pdf', 'name' => "b\r\n.pdf" ),
+						array( 'path' => 'phar:///tmp/x.phar/y', 'name' => 'y' ),
+						array( 'path' => 'https://example.net/z.pdf', 'name' => 'z' ),
+						array( 'path' => array( 'x' ) ),
+						array( 'name' => 'no path' ),
+						'/tmp/c.pdf',
+					),
+				)
+			)
+		);
+
+		$this->assertSame(
+			array(
+				array( 'path' => '/tmp/a.pdf', 'name' => 'a.pdf' ),
+				array( 'path' => '/tmp/b.pdf', 'name' => 'b.pdf' ),
+			),
+			$clean->attachments()
+		);
+	}
+
+	public function test_normalize_accepts_bcc_only() {
+		$clean = ( new MessageFactory() )->normalize(
+			$this->message(
+				array(
+					'to'  => array(),
+					'bcc' => array( array( 'email' => 'b@example.org', 'name' => '' ) ),
+				)
+			)
+		);
+		$this->assertSame( 'b@example.org', $clean->bcc()[0]['email'] );
+	}
+
+	public function test_normalize_rejects_a_message_without_recipients() {
+		$this->expectException( InvalidMessageException::class );
+		$this->expectExceptionMessage( 'No valid recipient address.' );
+
+		( new MessageFactory() )->normalize( $this->message( array( 'to' => array( array( 'email' => 'nope', 'name' => '' ) ) ) ) );
+	}
+
+	public function test_normalize_rejects_an_invalid_from_address() {
+		$this->expectException( InvalidMessageException::class );
+		$this->expectExceptionMessage( 'Invalid From address &quot;bad&quot;.' );
+
+		( new MessageFactory() )->normalize( $this->message( array( 'from_email' => 'bad' ) ) );
 	}
 }

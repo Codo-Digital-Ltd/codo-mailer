@@ -15,6 +15,12 @@ defined( 'ABSPATH' ) || exit;
 class TransportFactory {
 
 	/**
+	 * Connection types that send JSON instead of PHPMailer-built MIME, so
+	 * core's phpmailer_init action never runs for them.
+	 */
+	const WITHOUT_PHPMAILER = array( 'postmark', 'brevo', 'sendgrid' );
+
+	/**
 	 * HTTP client.
 	 *
 	 * @var HttpClient
