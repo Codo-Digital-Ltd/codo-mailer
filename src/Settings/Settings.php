@@ -77,7 +77,12 @@ class Settings {
 	/**
 	 * Supported connection types and their fields.
 	 *
-	 * @return array<string, array{label: string, fields: array<string, array{label: string, type: string, default?: mixed, options?: array<string, string>}>}>
+	 * Field keys: label, type (text, int, bool, select, secret), default,
+	 * options (select), binds_secret (a server field a kept secret belongs
+	 * to), clearable (a secret the form can remove) and paired_with (a field
+	 * whose change drops this kept secret).
+	 *
+	 * @return array<string, array{label: string, fields: array<string, array{label: string, type: string, default?: mixed, options?: array<string, string>, binds_secret?: bool, clearable?: bool, paired_with?: string}>}>
 	 */
 	public static function connection_types() {
 		return array(
@@ -125,18 +130,26 @@ class Settings {
 			'ses'      => array(
 				'label'  => 'Amazon SES',
 				'fields' => array(
-					'region'     => array(
+					'region'        => array(
 						'label'   => 'Region',
 						'type'    => 'text',
 						'default' => 'eu-west-2',
 					),
-					'access_key' => array(
+					'access_key'    => array(
 						'label' => 'Access key ID',
 						'type'  => 'text',
 					),
-					'secret_key' => array(
+					'secret_key'    => array(
 						'label' => 'Secret access key',
 						'type'  => 'secret',
+					),
+					// Only for temporary credentials (an IAM role or STS), which
+					// expire: so it can be removed, and a new access key drops it.
+					'session_token' => array(
+						'label'       => 'Session token',
+						'type'        => 'secret',
+						'clearable'   => true,
+						'paired_with' => 'access_key',
 					),
 				),
 			),
@@ -524,7 +537,9 @@ class Settings {
 
 			if ( 'secret' === $meta['type'] ) {
 				$raw = is_string( $raw ) ? trim( $raw ) : '';
-				if ( '' === $raw ) {
+				if ( ! empty( $meta['clearable'] ) && ! empty( $submitted[ $field . '_clear' ] ) ) {
+					$clean[ $field ] = '';
+				} elseif ( '' === $raw ) {
 					$clean[ $field ] = $same_type && isset( $previous[ $field ] ) ? (string) $previous[ $field ] : '';
 					$kept[]          = $field;
 				} else {
@@ -542,6 +557,15 @@ class Settings {
 				$raw = isset( $meta['default'] ) ? $meta['default'] : '';
 			}
 			$clean[ $field ] = $this->cast( $meta, is_scalar( $raw ) ? sanitize_text_field( (string) $raw ) : '' );
+		}
+
+		// A kept secret that belongs to another field (an AWS session token
+		// to its access key) is dropped when that field changes.
+		foreach ( $kept as $secret ) {
+			$paired = isset( $types[ $type ]['fields'][ $secret ]['paired_with'] ) ? $types[ $type ]['fields'][ $secret ]['paired_with'] : '';
+			if ( '' !== $paired && ( ! isset( $previous[ $paired ] ) || (string) $previous[ $paired ] !== (string) $clean[ $paired ] ) ) {
+				$clean[ $secret ] = '';
+			}
 		}
 
 		// A kept secret is only reused for the server it was entered for, so

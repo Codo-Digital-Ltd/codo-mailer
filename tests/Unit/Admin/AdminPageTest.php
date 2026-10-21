@@ -328,11 +328,49 @@ class AdminPageTest extends TestCase {
 		return array(
 			'smtp'     => array( 'smtp', array( 'host' => 'smtp.example.com', 'port' => 465, 'encryption' => 'ssl', 'username' => 'u', 'password' => 'p' ) ),
 			'ses'      => array( 'ses', array( 'region' => 'eu-west-2', 'access_key' => 'AKIA1', 'secret_key' => 's3' ) ),
+			'ses-temp' => array( 'ses', array( 'region' => 'eu-west-2', 'access_key' => 'ASIA1', 'secret_key' => 's3', 'session_token' => 'tok' ) ),
 			'postmark' => array( 'postmark', array( 'server_token' => 'pm', 'message_stream' => 'broadcast' ) ),
 			'mailgun'  => array( 'mailgun', array( 'domain' => 'mg.example.com', 'api_key' => 'key-1', 'region' => 'us' ) ),
 			'brevo'    => array( 'brevo', array( 'api_key' => 'xkeysib' ) ),
 			'sendgrid' => array( 'sendgrid', array( 'api_key' => 'SG.1' ) ),
 		);
+	}
+
+	public function test_saved_session_token_can_be_removed_from_the_form() {
+		$this->submit_provider( 'ses', array( 'region' => 'eu-west-2', 'access_key' => 'ASIA1', 'secret_key' => 's3', 'session_token' => 'tok' ) );
+
+		$html = $this->render();
+		$this->assertStringContainsString( '<input type="checkbox" name="codo_mailer[primary][ses][session_token_clear]" value="1"> Remove', $html );
+		$this->assertStringNotContainsString( 'secret_key_clear', $html, 'only the session token is removable' );
+		$this->assertStringContainsString( 'Only for temporary credentials', $html );
+
+		$kept = $this->submit_provider( 'ses', array() );
+		$this->assertSame( 'tok', $kept['session_token'], 'left blank, it is kept' );
+
+		$fields = $this->browser_fields( $this->render() );
+		$query  = array();
+		foreach ( $fields as $pair ) {
+			$query[] = rawurlencode( $pair[0] ) . '=' . rawurlencode( $pair[1] );
+		}
+		$query[] = rawurlencode( 'codo_mailer[primary][ses][session_token_clear]' ) . '=1';
+		parse_str( implode( '&', $query ), $post );
+		$this->settings->save( $post['codo_mailer'] );
+
+		$connection = $this->settings->connection( 'primary' );
+		$this->assertSame( '', $connection['session_token'] );
+		$this->assertSame( 's3', $connection['secret_key'] );
+	}
+
+	public function test_no_remove_box_for_a_session_token_set_in_wp_config() {
+		$this->constants = array(
+			'CODO_MAILER_PRIMARY_TYPE'          => 'ses',
+			'CODO_MAILER_PRIMARY_SESSION_TOKEN' => 'const-token',
+		);
+
+		$html = $this->render();
+
+		$this->assertStringNotContainsString( 'session_token_clear', $html );
+		$this->assertStringNotContainsString( 'const-token', $html );
 	}
 
 	public function test_resaving_the_form_keeps_secrets() {
@@ -343,11 +381,11 @@ class AdminPageTest extends TestCase {
 
 	public function test_webhook_url_is_never_printed_back() {
 		$crypto       = new Crypto( 'k' );
-		$this->option = array( 'alert_webhook' => $crypto->encrypt( 'https://hooks.slack.com/services/T/B/SECRET' ) );
+		$this->option = array( 'alert_webhook' => $crypto->encrypt( 'https://hooks.slack.com/services/T/B/WEBHOOK-SECRET' ) );
 
 		$html = $this->render();
 
-		$this->assertStringNotContainsString( 'SECRET', $html );
+		$this->assertStringNotContainsString( 'WEBHOOK-SECRET', $html );
 		$this->assertStringContainsString( 'name="codo_mailer[alert_webhook]" class="regular-text" autocomplete="off" placeholder="Saved. Leave blank to keep it."', $html );
 		$this->assertStringContainsString( 'name="codo_mailer[alert_webhook_clear]"', $html );
 	}

@@ -491,4 +491,84 @@ class SettingsTest extends TestCase {
 			}
 		}
 	}
+
+	public function test_ses_session_token_is_an_optional_encrypted_secret() {
+		$clean = $this->settings()->sanitize(
+			array(
+				'primary' => array(
+					'type' => 'ses',
+					'ses'  => array( 'region' => 'eu-west-2', 'access_key' => 'ASIATEMP', 'secret_key' => 's', 'session_token' => 'tok' ),
+				),
+			)
+		);
+		$this->assertSame( 'tok', $this->crypto->decrypt( $clean['primary']['session_token'] ) );
+
+		$this->option = $clean;
+		$this->assertSame( 'tok', $this->settings()->connection( 'primary' )['session_token'] );
+
+		$this->option = array( 'primary' => array( 'type' => 'ses', 'access_key' => 'AKIA1' ) );
+		$this->assertSame( '', $this->settings()->connection( 'primary' )['session_token'], 'optional: empty when never set' );
+	}
+
+	public function test_ses_session_token_can_be_set_in_wp_config() {
+		$this->constants = array(
+			'CODO_MAILER_PRIMARY_TYPE'          => 'ses',
+			'CODO_MAILER_PRIMARY_SESSION_TOKEN' => 'const-token',
+		);
+
+		$settings = $this->settings();
+		$this->assertSame( 'const-token', $settings->connection( 'primary' )['session_token'] );
+		$this->assertTrue( $settings->is_connection_constant( 'primary', 'session_token' ) );
+	}
+
+	public function test_blank_session_token_is_kept_while_the_access_key_is_unchanged() {
+		$token        = $this->crypto->encrypt( 'tok' );
+		$this->option = array( 'primary' => array( 'type' => 'ses', 'region' => 'eu-west-2', 'access_key' => 'ASIA1', 'secret_key' => $this->crypto->encrypt( 's' ), 'session_token' => $token ) );
+
+		$clean = $this->settings()->sanitize( array( 'primary' => array( 'type' => 'ses', 'region' => 'eu-west-2', 'access_key' => 'ASIA1' ) ) );
+
+		$this->assertSame( $token, $clean['primary']['session_token'] );
+	}
+
+	public function test_saved_session_token_is_dropped_with_a_new_access_key_but_the_secret_key_is_kept() {
+		$secret       = $this->crypto->encrypt( 's' );
+		$this->option = array( 'primary' => array( 'type' => 'ses', 'region' => 'eu-west-2', 'access_key' => 'ASIA1', 'secret_key' => $secret, 'session_token' => $this->crypto->encrypt( 'tok' ) ) );
+
+		$clean = $this->settings()->sanitize( array( 'primary' => array( 'type' => 'ses', 'region' => 'eu-west-2', 'access_key' => 'AKIA2' ) ) );
+
+		$this->assertSame( '', $clean['primary']['session_token'], 'a token only works with the access key it was issued with' );
+		$this->assertSame( $secret, $clean['primary']['secret_key'], 'unchanged behaviour for the secret key' );
+	}
+
+	public function test_new_session_token_is_stored_with_a_new_access_key() {
+		$this->option = array( 'primary' => array( 'type' => 'ses', 'access_key' => 'ASIA1', 'session_token' => $this->crypto->encrypt( 'old' ) ) );
+
+		$clean = $this->settings()->sanitize( array( 'primary' => array( 'type' => 'ses', 'access_key' => 'ASIA2', 'session_token' => 'new' ) ) );
+
+		$this->assertSame( 'new', $this->crypto->decrypt( $clean['primary']['session_token'] ) );
+	}
+
+	public function test_remove_clears_a_saved_session_token() {
+		$this->option = array( 'primary' => array( 'type' => 'ses', 'access_key' => 'ASIA1', 'session_token' => $this->crypto->encrypt( 'tok' ) ) );
+
+		$clean = $this->settings()->sanitize(
+			array(
+				'primary' => array(
+					'type' => 'ses',
+					'ses'  => array( 'access_key' => 'ASIA1', 'session_token' => '', 'session_token_clear' => '1' ),
+				),
+			)
+		);
+
+		$this->assertSame( '', $clean['primary']['session_token'] );
+	}
+
+	public function test_remove_only_applies_to_clearable_secrets() {
+		$secret       = $this->crypto->encrypt( 's' );
+		$this->option = array( 'primary' => array( 'type' => 'ses', 'access_key' => 'ASIA1', 'secret_key' => $secret ) );
+
+		$clean = $this->settings()->sanitize( array( 'primary' => array( 'type' => 'ses', 'access_key' => 'ASIA1', 'secret_key_clear' => '1' ) ) );
+
+		$this->assertSame( $secret, $clean['primary']['secret_key'] );
+	}
 }

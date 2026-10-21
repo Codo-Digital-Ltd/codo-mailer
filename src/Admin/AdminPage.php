@@ -448,8 +448,18 @@ class AdminPage {
 					esc_attr( $saved ? __( 'Saved. Leave blank to keep it.', 'codo-mailer' ) : '' ),
 					disabled( $locked, true, false )
 				);
+				if ( $saved && ! $locked && ! empty( $meta['clearable'] ) ) {
+					printf(
+						' <label><input type="checkbox" name="%s" value="1"> %s</label>',
+						esc_attr( 'codo_mailer[' . $slot . '][' . $type . '][' . $field . '_clear]' ),
+						esc_html__( 'Remove', 'codo-mailer' )
+					);
+				}
 				if ( $saved && 'smtp' === $type ) {
 					echo '<p class="description">' . esc_html__( 'Changing the host, port, encryption or username clears the saved password, so enter it again.', 'codo-mailer' ) . '</p>';
+				}
+				if ( 'ses' === $type && 'session_token' === $field ) {
+					echo '<p class="description">' . esc_html__( 'Optional. Only for temporary credentials (an IAM role or AWS STS); leave blank for a normal access key. Temporary credentials expire, so set them in wp-config.php from your host\'s environment, or leave the access key ID blank here to use the AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and AWS_SESSION_TOKEN environment variables.', 'codo-mailer' ) . '</p>';
 				}
 				break;
 			case 'bool':
