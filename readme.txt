@@ -117,10 +117,6 @@ The failure is logged with each provider's error, WordPress's `wp_mail_failed` a
 
 No. It talks only to the email provider (and alert webhook) you configure.
 
-= Is it multisite compatible? =
-
-Yes. Each site has its own settings and log, managed by super admins only. Constants in `wp-config.php` apply to every site in the network.
-
 = Does the email log work with WordPress's privacy tools (GDPR export and erasure)? =
 
 Yes. Codo Mailer adds an exporter and an eraser to Tools > Export Personal Data and Tools > Erase Personal Data. Both find log entries where the person's address is a To, Cc, Bcc or Reply-To address (exact matches only, ignoring case).
@@ -133,6 +129,10 @@ Settings > Privacy > Policy Guide includes suggested text about the email log an
 = How long are emails kept in the log? =
 
 For the number of days set in "Keep logs for (days)", 30 by default. Old entries are deleted by a daily WP-Cron task, which WordPress runs when the site gets visits. If your site sets `DISABLE_WP_CRON`, make sure a system cron job calls `wp-cron.php` (or runs `wp cron event run --due-now`), otherwise entries are kept until it does. You can also empty the log at any time with "Delete all log entries" on the Email log tab.
+
+= Is it multisite compatible? =
+
+Yes. Each site has its own settings and log, managed by super admins only. Constants in `wp-config.php` apply to every site in the network.
 
 = Can I send an email with only Bcc recipients? =
 
