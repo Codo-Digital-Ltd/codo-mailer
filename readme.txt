@@ -67,7 +67,7 @@ define( 'CODO_MAILER_BACKUP_PASSWORD', '...' );
 define( 'CODO_MAILER_ALERT_EMAIL', 'ops@example.co.uk' );
 `
 
-Connection field names: SMTP `host`, `port`, `encryption` (tls, ssl, none), `auth`, `username`, `password`; SES `region`, `access_key`, `secret_key`; Postmark `server_token`, `message_stream`; Mailgun `domain`, `api_key`, `region` (eu, us); Brevo and SendGrid `api_key`.
+Connection field names: SMTP `host`, `port`, `encryption` (tls, ssl, none), `auth`, `username`, `password`; SES `region`, `access_key`, `secret_key`, `session_token` (optional, for temporary credentials); Postmark `server_token`, `message_stream`; Mailgun `domain`, `api_key`, `region` (eu, us); Brevo and SendGrid `api_key`.
 
 If an SMTP password is a constant but the host, port, encryption or username are not, the first successful send locks the connection to that server. Changing any of them in the admin screen then stops the connection, so the password can't be redirected to another server. To move servers, set the new values as constants too.
 
@@ -120,6 +120,16 @@ No. It talks only to the email provider (and alert webhook) you configure.
 
 Yes. Each site has its own settings and log, managed by super admins only. Constants in `wp-config.php` apply to every site in the network.
 
+= Can I use temporary AWS credentials (an IAM role or STS) with Amazon SES? =
+
+Yes. Temporary credentials come with a session token, which Codo Mailer sends as `X-Amz-Security-Token` and includes in the request signature. You can supply them in three ways:
+
+* Leave the access key ID blank on the settings screen (and don't define it in wp-config.php). Codo Mailer then reads the standard `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `AWS_SESSION_TOKEN` environment variables, as set on AWS Lambda and by many container platforms.
+* Define `CODO_MAILER_PRIMARY_SESSION_TOKEN` (or `CODO_MAILER_BACKUP_SESSION_TOKEN`) in wp-config.php alongside the access key and secret, for example from values your deployment refreshes.
+* Enter the session token on the settings screen. Temporary credentials expire, typically within hours, so this is only practical for testing. Saving a different access key ID removes a saved session token, and the "Remove" box next to it clears it.
+
+Codo Mailer does not fetch credentials from the EC2 instance metadata service or the ECS container endpoint itself; on those platforms, export the role's credentials to the environment variables above.
+
 = Can I send an email with only Bcc recipients? =
 
 Over SMTP, Amazon SES and Mailgun, yes. Postmark, Brevo and SendGrid require at least one To address and will report an error.
@@ -156,7 +166,7 @@ Codo Mailer delivers your site's email through an email provider that you choose
 
 **When data is sent:** every time WordPress sends an email through `wp_mail()` (for example password resets, new-user notifications, WooCommerce orders and form notifications), when you use "Send a test", and when you resend an email from the log. The primary connection is used first; the backup connection is contacted only if the primary fails.
 
-**What is sent:** the email itself: sender, recipients (To, Cc, Bcc), Reply-To, subject, body, attachments and any custom headers, plus the credentials you entered for that provider so it can authenticate the request (for Amazon SES, your access key ID and a signature made with your secret key; the secret key itself is never sent).
+**What is sent:** the email itself: sender, recipients (To, Cc, Bcc), Reply-To, subject, body, attachments and any custom headers, plus the credentials you entered for that provider so it can authenticate the request (for Amazon SES, your access key ID, the session token if you use temporary credentials, and a signature made with your secret key; the secret key itself is never sent).
 
 = Amazon SES (Amazon Web Services) =
 

@@ -7,7 +7,7 @@ use CodoDigital\Mailer\Transport\SesTransport;
 
 class SesTransportTest extends HttpTransportTestCase {
 
-	private function transport( $http, array $config = array(), $clock = null ) {
+	private function transport( $http, array $config = array(), $clock = null, array $env = array() ) {
 		return new SesTransport(
 			array_merge(
 				array(
@@ -22,6 +22,9 @@ class SesTransportTest extends HttpTransportTestCase {
 			new AwsSigV4(),
 			null !== $clock ? $clock : static function () {
 				return 1790000000;
+			},
+			static function ( $name ) use ( $env ) {
+				return array_key_exists( $name, $env ) ? $env[ $name ] : false;
 			}
 		);
 	}
@@ -111,5 +114,88 @@ class SesTransportTest extends HttpTransportTestCase {
 	public function test_raw_mime_transports_check_attachment_size_too() {
 		$result = $this->transport( $this->unused_http() )->send( $this->message_with_attachments_of( array( 30 * MB_IN_BYTES ) ) );
 		$this->assertSame( 'Attachments total 30 MB, over the 25 MB limit for Amazon SES connections.', $result->error() );
+	}
+
+	public function test_session_token_is_sent_and_signed() {
+		$result = $this->transport( $this->http( 200, '{}' ), array( 'session_token' => 'FwoGZXIvYXdzEXAMPLE' ) )->send( $this->message() );
+
+		$this->assertTrue( $result->is_success(), $result->error() );
+		$this->assertSame( 'FwoGZXIvYXdzEXAMPLE', $this->request['headers']['x-amz-security-token'] );
+		$this->assertStringContainsString( 'SignedHeaders=content-type;host;x-amz-date;x-amz-security-token,', $this->request['headers']['Authorization'] );
+	}
+
+	public function test_no_token_header_for_long_term_keys() {
+		$this->transport( $this->http( 200, '{}' ) )->send( $this->message() );
+
+		$this->assertArrayNotHasKey( 'x-amz-security-token', $this->request['headers'] );
+	}
+
+	public function test_credentials_come_from_the_aws_environment_when_no_access_key_is_configured() {
+		$env = array(
+			'AWS_ACCESS_KEY_ID'     => 'ASIAENV',
+			'AWS_SECRET_ACCESS_KEY' => 'env-secret',
+			'AWS_SESSION_TOKEN'     => ' env-token ',
+		);
+
+		$result = $this->transport( $this->http( 200, '{}' ), array( 'access_key' => '', 'secret_key' => 'saved-without-a-key' ), null, $env )->send( $this->message() );
+
+		$this->assertTrue( $result->is_success(), $result->error() );
+		$this->assertStringStartsWith( 'AWS4-HMAC-SHA256 Credential=ASIAENV/', $this->request['headers']['Authorization'] );
+		$this->assertSame( 'env-token', $this->request['headers']['x-amz-security-token'] );
+	}
+
+	public function test_environment_without_a_session_token() {
+		$env = array(
+			'AWS_ACCESS_KEY_ID'     => 'AKIAENV',
+			'AWS_SECRET_ACCESS_KEY' => 'env-secret',
+		);
+
+		$this->transport( $this->http( 200, '{}' ), array( 'access_key' => '', 'secret_key' => '' ), null, $env )->send( $this->message() );
+
+		$this->assertStringStartsWith( 'AWS4-HMAC-SHA256 Credential=AKIAENV/', $this->request['headers']['Authorization'] );
+		$this->assertArrayNotHasKey( 'x-amz-security-token', $this->request['headers'] );
+	}
+
+	public function test_a_configured_access_key_is_never_mixed_with_environment_credentials() {
+		$env = array(
+			'AWS_ACCESS_KEY_ID'     => 'ASIAENV',
+			'AWS_SECRET_ACCESS_KEY' => 'env-secret',
+			'AWS_SESSION_TOKEN'     => 'env-token',
+		);
+
+		$this->transport( $this->http( 200, '{}' ), array(), null, $env )->send( $this->message() );
+
+		$this->assertStringStartsWith( 'AWS4-HMAC-SHA256 Credential=AKIATEST/', $this->request['headers']['Authorization'] );
+		$this->assertArrayNotHasKey( 'x-amz-security-token', $this->request['headers'] );
+
+		$result = $this->transport( $this->unused_http(), array( 'secret_key' => '' ), null, $env )->send( $this->message() );
+		$this->assertSame( 'ses connection is missing "secret_key".', $result->error() );
+	}
+
+	public function test_no_access_key_anywhere() {
+		$result = $this->transport( $this->unused_http(), array( 'access_key' => '' ) )->send( $this->message() );
+		$this->assertSame( 'ses connection is missing "access_key".', $result->error() );
+	}
+
+	public function test_default_environment_reader_is_getenv() {
+		$saved = array();
+		foreach ( array( 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN' ) as $name ) {
+			$saved[ $name ] = getenv( $name );
+		}
+		putenv( 'AWS_ACCESS_KEY_ID=ASIAGETENV' );
+		putenv( 'AWS_SECRET_ACCESS_KEY=getenv-secret' );
+		putenv( 'AWS_SESSION_TOKEN=getenv-token' );
+
+		try {
+			$transport = new SesTransport( array( 'region' => 'eu-west-2' ), $this->http( 200, '{}' ), new PhpMailerBuilder(), new AwsSigV4() );
+			$transport->send( $this->message() );
+		} finally {
+			foreach ( $saved as $name => $value ) {
+				putenv( false === $value ? $name : $name . '=' . $value );
+			}
+		}
+
+		$this->assertStringStartsWith( 'AWS4-HMAC-SHA256 Credential=ASIAGETENV/', $this->request['headers']['Authorization'] );
+		$this->assertSame( 'getenv-token', $this->request['headers']['x-amz-security-token'] );
 	}
 }
