@@ -50,6 +50,21 @@ final class SmtpTransport implements TransportInterface {
 	}
 
 	/**
+	 * Whether a connection would send its SMTP password unencrypted to
+	 * another machine: Authenticate on, Encryption none, host not loopback.
+	 *
+	 * @param array<string, mixed> $config Connection settings.
+	 * @return bool
+	 */
+	public static function is_plaintext_auth( array $config ) {
+		if ( empty( $config['auth'] ) || ! isset( $config['encryption'] ) || 'none' !== $config['encryption'] ) {
+			return false;
+		}
+		$host = strtolower( trim( isset( $config['host'] ) ? (string) $config['host'] : '', " \t[]" ) );
+		return '' !== $host && 'localhost' !== $host && '::1' !== $host && 0 !== strpos( $host, '127.' );
+	}
+
+	/**
 	 * Send the message.
 	 *
 	 * @param Message $message Message.
@@ -58,6 +73,22 @@ final class SmtpTransport implements TransportInterface {
 	public function send( Message $message ) {
 		if ( empty( $this->config['host'] ) ) {
 			return SendResult::failure( 'SMTP host is not configured.' );
+		}
+
+		if ( self::is_plaintext_auth( $this->config ) ) {
+			/**
+			 * Filters whether SMTP may authenticate over an unencrypted connection.
+			 *
+			 * With Encryption set to None and Authenticate on, the username and
+			 * password cross the network in plain text. Return false to refuse
+			 * to send instead, e.g. on a host that manages many sites.
+			 *
+			 * @param bool   $allow Default true, for internal relays that need it.
+			 * @param string $host  SMTP host.
+			 */
+			if ( ! apply_filters( 'codo_mailer_smtp_allow_plaintext_auth', true, (string) $this->config['host'] ) ) {
+				return SendResult::failure( 'SMTP is set to authenticate without encryption, which would send the password in plain text, and this site does not allow that. Set Encryption to TLS or SSL.' );
+			}
 		}
 
 		try {

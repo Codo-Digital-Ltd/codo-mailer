@@ -11,6 +11,7 @@ use CodoDigital\Mailer\Log\LogRepository;
 use CodoDigital\Mailer\Mail\Dispatcher;
 use CodoDigital\Mailer\Mail\InvalidMessageException;
 use CodoDigital\Mailer\Settings\Settings;
+use CodoDigital\Mailer\Transport\SmtpTransport;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -305,6 +306,15 @@ class AdminPage {
 		echo '<h2>' . esc_html( $title ) . '</h2>';
 		if ( isset( $config['error'] ) ) {
 			echo '<div class="notice notice-error inline"><p>' . esc_html( $config['error'] ) . '</p></div>';
+		}
+		if ( 'smtp' === $config['type'] && SmtpTransport::is_plaintext_auth( $config ) ) {
+			echo '<div class="notice notice-warning inline"><p>' . esc_html(
+				sprintf(
+					/* translators: %s: SMTP host. */
+					__( 'This connection logs in to %s without encryption, so the SMTP username and password are sent in plain text. Set Encryption to TLS or SSL unless this is a trusted internal relay.', 'codo-mailer' ),
+					$config['host']
+				)
+			) . '</p></div>';
 		}
 		if ( 'backup' === $slot ) {
 			echo '<p>' . esc_html__( 'Used only when the primary connection fails.', 'codo-mailer' ) . '</p>';
