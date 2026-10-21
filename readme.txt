@@ -40,7 +40,7 @@ API providers are used over HTTPS, so blocked SMTP ports on your host don't matt
 
 Email logs hold password-reset links, so a leaky log is a site takeover waiting to happen. Codo Mailer is designed around that:
 
-* Password-reset, set-password and email-confirmation links, one-time tokens and plaintext "Password:" lines are **redacted** before an email is logged, and those emails cannot be resent from the log. Redaction is best-effort, so as a fail-safe, if a secret still shows up once the body is decoded, the whole body is left out of the log.
+* Password-reset, set-password and email-confirmation links, one-time tokens, verification codes and PINs, and plaintext passwords are **redacted** from the body and subject before an email is logged or included in an alert, and those emails cannot be resent from the log. Redaction is best-effort, so as a fail-safe, if a secret still shows up once the body is decoded, the whole body is left out of the log.
 * The log is only ever shown on the admin screen to administrators (`manage_options`; on multisite, super admins only, because whoever controls mail can read any user's reset email). There are **no REST or AJAX endpoints** for it.
 * API keys and passwords are **encrypted at rest** (libsodium), so a database dump alone does not reveal them.
 * Or keep credentials out of the database entirely with **`wp-config.php` constants**.
@@ -75,7 +75,7 @@ To use your own encryption key instead of the site salts, define `CODO_MAILER_EN
 
 = For developers =
 
-* `codo_mailer_redaction_patterns` filter: add regular expressions for other secret links (e.g. magic-login tokens).
+* `codo_mailer_redaction_patterns` filter: add regular expressions for other secrets (e.g. magic-login tokens). They apply to the subject as well as the body.
 * `codo_mailer_transport` filter: provide a transport for a custom connection type.
 * `codo_mailer_alert_interval` filter: change the alert throttle (seconds).
 * `codo_mailer_capability` filter: change who can manage the plugin.

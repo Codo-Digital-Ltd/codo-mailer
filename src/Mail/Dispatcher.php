@@ -270,11 +270,14 @@ class Dispatcher {
 		}
 
 		$body     = $message->body();
+		$subject  = $message->subject();
 		$redacted = false;
 		if ( $this->settings->get( 'redact_sensitive' ) ) {
-			$clean    = $this->redactor->redact( $body );
-			$body     = $clean['body'];
-			$redacted = $clean['redacted'];
+			$clean         = $this->redactor->redact( $body );
+			$clean_subject = $this->redactor->redact_subject( $subject );
+			$body          = $clean['body'];
+			$subject       = $clean_subject['body'];
+			$redacted      = $clean['redacted'] || $clean_subject['redacted'];
 		}
 
 		$this->log->insert(
@@ -283,7 +286,7 @@ class Dispatcher {
 				'connection'  => $label,
 				'source'      => $source,
 				'to'          => $message->to(),
-				'subject'     => $message->subject(),
+				'subject'     => $subject,
 				'body'        => $body,
 				'headers'     => array(
 					'from_email'   => $message->from_email(),

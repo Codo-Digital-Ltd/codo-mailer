@@ -8,6 +8,7 @@
 namespace CodoDigital\Mailer\Alerts;
 
 use CodoDigital\Mailer\Mail\Message;
+use CodoDigital\Mailer\Mail\Redactor;
 use CodoDigital\Mailer\Settings\Settings;
 use CodoDigital\Mailer\Transport\HttpClient;
 use CodoDigital\Mailer\Transport\TransportException;
@@ -46,14 +47,23 @@ class AlertNotifier {
 	private $http;
 
 	/**
+	 * Redacts secrets from the failed email's subject.
+	 *
+	 * @var Redactor
+	 */
+	private $redactor;
+
+	/**
 	 * Constructor.
 	 *
-	 * @param Settings   $settings Settings.
-	 * @param HttpClient $http     HTTP client.
+	 * @param Settings      $settings Settings.
+	 * @param HttpClient    $http     HTTP client.
+	 * @param Redactor|null $redactor Redactor for the subject; defaults to a new one.
 	 */
-	public function __construct( Settings $settings, HttpClient $http ) {
+	public function __construct( Settings $settings, HttpClient $http, ?Redactor $redactor = null ) {
 		$this->settings = $settings;
 		$this->http     = $http;
+		$this->redactor = $redactor ? $redactor : new Redactor();
 	}
 
 	/**
@@ -152,7 +162,10 @@ class AlertNotifier {
 
 		$site    = wp_specialchars_decode( (string) get_bloginfo( 'name' ), ENT_QUOTES );
 		$subject = $message instanceof Message ? $message->subject() : '';
-		$text    = sprintf(
+		if ( '' !== $subject && $this->settings->get( 'redact_sensitive' ) ) {
+			$subject = $this->redactor->redact_subject( $subject )['body'];
+		}
+		$text = sprintf(
 			/* translators: 1: site name, 2: email subject, 3: error message. */
 			__( 'Codo Mailer on %1$s could not send "%2$s": %3$s', 'codo-mailer' ),
 			$site,

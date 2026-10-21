@@ -87,7 +87,8 @@ final class Plugin {
 		$settings   = new Settings( new Crypto() );
 		$http       = new HttpClient();
 		$log        = new LogRepository( $wpdb );
-		$dispatcher = new Dispatcher( $settings, new TransportFactory( $http ), $log, new AlertNotifier( $settings, $http ), new Redactor() );
+		$redactor   = new Redactor();
+		$dispatcher = new Dispatcher( $settings, new TransportFactory( $http ), $log, new AlertNotifier( $settings, $http, $redactor ), $redactor );
 		$admin      = new AdminPage( $settings, $dispatcher, $log );
 
 		return new self( $settings, $log, $dispatcher, $admin );
