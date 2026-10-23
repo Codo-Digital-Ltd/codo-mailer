@@ -86,14 +86,24 @@ class SendGridTransportTest extends HttpTransportTestCase {
 	}
 
 	public function test_attachments_that_would_exhaust_memory_fail_cleanly() {
+		// PHP refuses a limit below the memory it has already reserved, which can
+		// be well above the memory in use, depending on which tests ran first. So
+		// the limit sits just above the reserved memory (with room for PHP to
+		// reserve one more 2 MB chunk), and the attachment is sized to need more
+		// than the room that leaves.
+		$limit = memory_get_usage( true ) + 4 * MB_IN_BYTES;
+		$size  = (int) ceil( ( $limit - memory_get_usage() ) / 4 / MB_IN_BYTES ) + 1;
+		$this->assertLessThanOrEqual( 25, $size, 'The attachment must stay under the 25 MB SendGrid limit for this test.' );
+		$message = $this->message_with_attachments_of( array( $size * MB_IN_BYTES ) );
+
 		$previous = ini_get( 'memory_limit' );
-		ini_set( 'memory_limit', (string) ( memory_get_usage() + 20 * MB_IN_BYTES ) );
+		ini_set( 'memory_limit', (string) $limit );
 		try {
-			$result = $this->transport( $this->unused_http() )->send( $this->message_with_attachments_of( array( 8 * MB_IN_BYTES ) ) );
+			$result = $this->transport( $this->unused_http() )->send( $message );
 		} finally {
 			ini_set( 'memory_limit', $previous );
 		}
-		$this->assertStringStartsWith( 'Attachments total 8 MB, too large to send through SendGrid with the memory PHP has left', $result->error() );
+		$this->assertStringStartsWith( 'Attachments total ' . $size . ' MB, too large to send through SendGrid with the memory PHP has left', $result->error() );
 	}
 
 	public function test_a_zero_limit_from_the_filter_disables_the_cap() {
