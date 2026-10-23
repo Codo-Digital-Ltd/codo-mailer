@@ -7,7 +7,7 @@
 
 Secure-by-default email delivery for WordPress: SMTP, Amazon SES, Postmark, Mailgun, Brevo and SendGrid, with an email log, resend, backup connection and failure alerts. Free, with no Pro tier, upsells or telemetry.
 
-Built and maintained by [Codo Digital](https://cododigital.co.uk). User-facing documentation is in [`readme.txt`](readme.txt) (the WordPress.org listing).
+Built and maintained by [Codo Digital](https://codo.digital). User-facing documentation is in [`readme.txt`](readme.txt) (the WordPress.org listing).
 
 ## How it works
 

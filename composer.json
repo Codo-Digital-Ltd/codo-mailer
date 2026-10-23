@@ -3,7 +3,7 @@
   "description": "Reliable, secure-by-default WordPress email delivery via SMTP, Amazon SES, Postmark, Mailgun, Brevo and SendGrid.",
   "type": "wordpress-plugin",
   "license": "GPL-2.0-or-later",
-  "authors": [{"name": "Codo Digital", "homepage": "https://cododigital.co.uk"}],
+  "authors": [{"name": "Codo Digital", "homepage": "https://codo.digital"}],
   "require": {"php": ">=7.4"},
   "require-dev": {
     "phpunit/phpunit": "^9.6",
