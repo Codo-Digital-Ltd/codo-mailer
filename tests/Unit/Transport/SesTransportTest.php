@@ -45,7 +45,7 @@ class SesTransportTest extends HttpTransportTestCase {
 
 		$this->assertTrue( $result->is_success(), $result->error() );
 		$this->assertSame( '0102-ses-id', $result->message_id() );
-		$this->assertSame( 'https://email.eu-west-2.amazonaws.com/v2/email/outbound-emails', $this->request['url'] );
+		$this->assertSame( 'https://email.eu-west-2.api.aws/v2/email/outbound-emails', $this->request['url'] );
 		$this->assertStringStartsWith( 'AWS4-HMAC-SHA256 Credential=AKIATEST/', $this->request['headers']['Authorization'] );
 		$this->assertStringContainsString( '/eu-west-2/ses/aws4_request', $this->request['headers']['Authorization'] );
 		$this->assertSame( gmdate( 'Ymd\THis\Z', 1790000000 ), $this->request['headers']['x-amz-date'] );
