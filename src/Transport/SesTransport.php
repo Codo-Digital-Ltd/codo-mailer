@@ -135,7 +135,7 @@ final class SesTransport extends AbstractHttpTransport {
 			)
 		);
 
-		$url     = 'https://email.' . $region . '.amazonaws.com/v2/email/outbound-emails'; // phpcs:ignore PluginCheck.CodeAnalysis.Offloading.OffloadedContent -- the SES sending API, not offloaded assets.
+		$url     = 'https://email.' . $region . '.api.aws/v2/email/outbound-emails'; // phpcs:ignore PluginCheck.CodeAnalysis.Offloading.OffloadedContent -- the dual-stack (IPv4 and IPv6) SES sending API, not offloaded assets.
 		$headers = $this->signer->sign(
 			'POST',
 			$url,

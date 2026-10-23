@@ -195,7 +195,7 @@ Codo Mailer delivers your site's email through an email provider that you choose
 
 = Amazon SES (Amazon Web Services) =
 
-Amazon Simple Email Service is an email sending service. If you choose it, each email is sent to the SES API endpoint for the region you select (`email.<region>.amazonaws.com`), signed with your access keys.
+Amazon Simple Email Service is an email sending service. If you choose it, each email is sent to the SES API endpoint for the region you select (`email.<region>.api.aws`), signed with your access keys.
 
 * Terms: https://aws.amazon.com/service-terms/
 * Privacy: https://aws.amazon.com/privacy/
@@ -237,6 +237,9 @@ If you choose SMTP, each email is sent to the SMTP server you enter (your mailbo
 If you enter a webhook URL (for example a Slack incoming webhook), Codo Mailer posts a JSON alert to that URL when an email fails to send, at most once an hour by default. The alert contains the site name, site URL, the failed email's subject, the error message and the time. Nothing is posted if the field is left empty. The service's terms and privacy policy are those of whoever provides that URL; for Slack: https://slack.com/main-services-agreement and https://slack.com/trust/privacy/privacy-policy
 
 == Changelog ==
+
+= Unreleased =
+* Fix: Amazon SES now sends through the dual-stack endpoint (`email.<region>.api.aws`), so sending works on hosts with IPv6-only outbound connections. Before, the IPv4-only `email.<region>.amazonaws.com` endpoint made these sends fail after a 10 second timeout.
 
 = 1.1.0 =
 * New: personal data export and erasure for the email log, under Tools > Export Personal Data and Tools > Erase Personal Data. Exports leave out other recipients and redact secrets. Erasure deletes emails sent only to that person and removes their address from emails that were also sent to others. Suggested privacy policy text is added to the Policy Guide.
