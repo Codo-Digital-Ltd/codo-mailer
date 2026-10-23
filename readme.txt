@@ -4,7 +4,7 @@ Tags: smtp, email, amazon ses, email log, deliverability
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.1.0
+Stable tag: 1.1.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -238,7 +238,7 @@ If you enter a webhook URL (for example a Slack incoming webhook), Codo Mailer p
 
 == Changelog ==
 
-= Unreleased =
+= 1.1.1 =
 * Fix: Amazon SES now sends through the dual-stack endpoint (`email.<region>.api.aws`), so sending works on hosts with IPv6-only outbound connections. Before, the IPv4-only `email.<region>.amazonaws.com` endpoint made these sends fail after a 10 second timeout.
 
 = 1.1.0 =
@@ -269,6 +269,9 @@ If you enter a webhook URL (for example a Slack incoming webhook), Codo Mailer p
 * First release: SMTP, Amazon SES, Postmark, Mailgun, Brevo and SendGrid; backup connection; email log with redaction and resend; email and webhook alerts; wp-config.php constants; encrypted secrets.
 
 == Upgrade Notice ==
+
+= 1.1.1 =
+Amazon SES sending now works on hosts that connect out over IPv6. Recommended for all SES users.
 
 = 1.1.0 =
 Personal data export and erasure for the email log, temporary AWS credentials for Amazon SES, and a new codo_mailer_message filter.
