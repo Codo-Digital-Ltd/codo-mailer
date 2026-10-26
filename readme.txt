@@ -14,7 +14,7 @@ Secure-by-default email delivery: SMTP, Amazon SES, Postmark, Mailgun, Brevo and
 
 Codo Mailer makes sure the email your WordPress site sends (password resets, order confirmations, form notifications) actually arrives. It routes every `wp_mail()` call through a proper email provider instead of your server's unauthenticated PHP mail.
 
-It is built by [Codo Digital](https://cododigital.co.uk), a UK web development and managed hosting company, and is the mailer we use on our own clients' sites. Everything is free. There is no Pro version, no upsell, no account to create and no tracking.
+It is built by [Codo Digital](https://codo.digital), a UK web development and managed hosting company, and is the mailer we use on our own clients' sites. Everything is free. There is no Pro version, no upsell, no account to create and no tracking.
 
 = Providers =
 
